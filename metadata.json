@@ -1,0 +1,6 @@
+{
+  "name": "SuperList",
+  "description": "Aplicativo completo para gerenciar listas de compras de supermercado com histórico de preços, dashboard analítico e controle de múltiplos usuários.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
