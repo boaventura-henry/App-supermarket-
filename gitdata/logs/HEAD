@@ -1,2 +1,0 @@
-0000000000000000000000000000000000000000 0ba763bcaca58aaf27a3dcd85673f4f66864130a Codex <codex@example.local> 1779833845 -0300	commit (initial): Prepare Netlify web deployment
-0ba763bcaca58aaf27a3dcd85673f4f66864130a a26e1b35def0d7f820d9f08fba0276e48e763157 Codex <codex@example.local> 1779835080 -0300	commit: Add production Netlify deployment pipeline
