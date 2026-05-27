@@ -16,3 +16,10 @@
 local.properties
 .env
 debug.keystore
+node_modules
+dist
+.netlify
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+repo-gitdata

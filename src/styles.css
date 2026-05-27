@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+}
+
+@layer components {
+  .button-secondary {
+    @apply min-h-11 items-center gap-2 rounded border border-supermarket-ink/15 bg-white px-5 py-3 font-bold text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
+  }
+
+  .input {
+    @apply h-11 w-full rounded border border-supermarket-ink/15 bg-white px-3 text-supermarket-ink outline-none transition placeholder:text-supermarket-ink/45 focus:border-supermarket-leaf focus:ring-4 focus:ring-supermarket-leaf/15;
+  }
+
+  .status-bought,
+  .status-pending {
+    @apply flex h-11 w-11 shrink-0 items-center justify-center rounded border transition;
+  }
+
+  .status-bought {
+    @apply border-supermarket-leaf bg-supermarket-leaf text-white;
+  }
+
+  .status-pending {
+    @apply border-supermarket-ink/15 bg-white text-supermarket-ink/45 hover:border-supermarket-leaf hover:text-supermarket-leaf;
+  }
+}

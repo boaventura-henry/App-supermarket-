@@ -1,21 +1,112 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# App Supermarket
 
-# Run and deploy your AI Studio app
+Projeto hibrido com o app Android Kotlin/Jetpack Compose original e uma camada web pronta para Netlify.
 
-This contains everything you need to run your app locally.
+## Diagnostico tecnico
 
-View your app in AI Studio: https://ai.studio/apps/6a1ddaf5-c267-4d50-923f-94df2d754ba1
+O repositorio original e um projeto Android Kotlin com Gradle Kotlin DSL:
 
-## Run Locally
+- Modulo Android: `app`
+- UI: Jetpack Compose e Material 3
+- Persistencia local: Room
+- Telas principais: autenticacao, lista de compras, cadastro/edicao de produtos, dashboard e historico de precos
+- Entidades principais: `User`, `Product` e `PriceHistory`
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+Como a Netlify hospeda frontend estatico e funcoes serverless, o app Android foi preservado e foi criada uma camada web em React + Vite + TypeScript + Tailwind na raiz do repositorio. A interface web reaproveita os conceitos do app Android: produto, marca, quantidade, preco unitario, mercado, item comprado, dashboard e historico.
 
+## Por que Vite + React
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+Vite + React foi escolhido porque a camada Netlify precisa ser uma SPA rapida, estatica e simples de publicar em `dist`. Next.js nao e necessario aqui porque nao ha SSR, rotas server-side complexas ou renderizacao incremental. As necessidades serverless foram isoladas em Netlify Functions.
+
+## Estrutura
+
+```text
+.
+|-- app/                         # Android Kotlin original
+|-- .github/workflows/deploy.yml # CI/CD Netlify
+|-- netlify/functions/           # Serverless functions
+|-- public/_redirects            # SPA fallback e API redirect
+|-- src/                         # Frontend web React
+|-- index.html
+|-- package.json
+|-- netlify.toml
+|-- vite.config.ts
+|-- tailwind.config.ts
+|-- tsconfig.json
+`-- build.gradle.kts
+```
+
+## Rodar a versao web localmente
+
+```bash
+npm install
+npm run dev
+```
+
+Abra `http://localhost:5173`.
+
+## Validar antes do deploy
+
+```bash
+npm run lint
+npm run build
+npm run preview
+```
+
+O build de producao fica em `dist`.
+
+## Rodar o Android localmente
+
+1. Abra o repositorio no Android Studio.
+2. Aguarde a sincronizacao do Gradle.
+3. Crie `.env` na raiz se precisar de chaves locais.
+4. Execute o modulo `app` em emulador ou dispositivo fisico.
+
+## Netlify
+
+`netlify.toml` define:
+
+- Build command: `npm run build`
+- Publish directory: `dist`
+- Functions directory: `netlify/functions`
+- Redirect `/api/*` para `/.netlify/functions/:splat`
+- Fallback `/*` para `/index.html`
+
+## GitHub Actions
+
+O workflow `.github/workflows/deploy.yml` executa a cada push na branch `main`:
+
+1. Checkout do codigo
+2. Setup do Node.js LTS
+3. Instalacao das dependencias
+4. Lint
+5. Build
+6. Deploy em producao na Netlify
+
+Configure os secrets do repositorio em `Settings > Secrets and variables > Actions`:
+
+- `NETLIFY_AUTH_TOKEN`
+- `NETLIFY_SITE_ID`
+
+Depois disso, publicar uma nova versao e apenas:
+
+```bash
+git push origin main
+```
+
+## Deploy manual opcional
+
+```powershell
+$env:NETLIFY_AUTH_TOKEN="seu-token"
+$env:NETLIFY_SITE_ID="site-id-do-supermarketjon"
+.\scripts\deploy-netlify.ps1 -Production
+```
+
+## Seguranca e CI/CD
+
+- Tokens ficam somente em GitHub Secrets ou variaveis locais.
+- Nenhuma credencial real e commitada.
+- O workflow usa permissao minima `contents: read`.
+- `concurrency` evita deploys simultaneos da mesma branch.
+- Lint e build bloqueiam deploy quebrado.
+- Headers de seguranca e cache de assets estao no `netlify.toml`.
