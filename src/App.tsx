@@ -4,6 +4,8 @@ import {
   CheckCircle2,
   Circle,
   Edit3,
+  Eye,
+  EyeOff,
   History,
   LogOut,
   Plus,
@@ -361,6 +363,7 @@ function AuthScreen({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [securityAnswer, setSecurityAnswer] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -415,12 +418,23 @@ function AuthScreen({
 
             <label className="field">
               <span>{mode === "recover" ? "Nova senha" : "Senha"}</span>
-              <input
-                className="input"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
+              <div className="password-field">
+                <input
+                  className="input pr-12"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <button
+                  className="password-toggle"
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                  title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                >
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+              </div>
             </label>
 
             {mode !== "login" ? (

@@ -62,6 +62,14 @@
     @apply grid gap-2 text-sm font-bold text-supermarket-ink/70;
   }
 
+  .password-field {
+    @apply relative;
+  }
+
+  .password-toggle {
+    @apply absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-supermarket-ink/45 transition hover:bg-supermarket-mint hover:text-supermarket-leaf;
+  }
+
   .status-bought,
   .status-pending {
     @apply flex h-11 w-11 shrink-0 items-center justify-center rounded border transition;
