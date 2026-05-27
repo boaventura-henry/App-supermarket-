@@ -8,11 +8,14 @@ import {
   EyeOff,
   History,
   LogOut,
+  Lock,
+  Mail,
   Moon,
   Plus,
   Save,
   Search,
   ShoppingBasket,
+  ShoppingCart,
   Store,
   Sun,
   Trash2,
@@ -284,9 +287,6 @@ export function App() {
         onLogin={handleLogin}
         onRegister={handleRegister}
         onRecover={handleRecover}
-        theme={theme}
-        themeClass={themeClass}
-        onToggleTheme={toggleTheme}
       />
     );
   }
@@ -368,10 +368,7 @@ function AuthScreen({
   onModeChange,
   onLogin,
   onRegister,
-  onRecover,
-  theme,
-  themeClass,
-  onToggleTheme
+  onRecover
 }: {
   mode: AuthMode;
   error: string;
@@ -380,81 +377,93 @@ function AuthScreen({
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (name: string, email: string, password: string, securityAnswer: string) => Promise<void>;
   onRecover: (email: string, securityAnswer: string, newPassword: string) => Promise<void>;
-  theme: ThemeMode;
-  themeClass: string;
-  onToggleTheme: () => void;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [securityAnswer, setSecurityAnswer] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (mode === "login") {
-      await onLogin(email, password);
-    }
-    if (mode === "register") {
-      await onRegister(name, email, password, securityAnswer);
-    }
-    if (mode === "recover") {
-      await onRecover(email, securityAnswer, password);
+    setIsSubmitting(true);
+    try {
+      if (mode === "login") {
+        await onLogin(email, password);
+      }
+      if (mode === "register") {
+        await onRegister(name, email, password, securityAnswer);
+      }
+      if (mode === "recover") {
+        await onRecover(email, securityAnswer, password);
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
+  const heading =
+    mode === "login" ? "Entrar no aplicativo" : mode === "register" ? "Criar sua conta" : "Recuperar senha";
+  const buttonLabel = mode === "login" ? "Acessar o App" : mode === "register" ? "Criar conta" : "Salvar nova senha";
+
   return (
-    <main className={`${themeClass} grid min-h-screen bg-supermarket-paper px-4 py-8 text-supermarket-ink sm:place-items-center`}>
-      <section className="grid w-full max-w-5xl overflow-hidden rounded-[2rem] bg-white shadow-soft lg:grid-cols-[0.9fr_1.1fr]">
-        <div className="bg-supermarket-leaf p-8 text-white">
-          <div className="mb-6 flex justify-end">
-            <ThemeButton theme={theme} onToggle={onToggleTheme} />
+    <main className="auth-screen">
+      <section className="auth-card" aria-labelledby="auth-title">
+        <div className="auth-brand">
+          <div className="auth-logo" aria-hidden="true">
+            <ShoppingCart size={34} />
           </div>
-          <div className="mb-8 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15">
-            <ShoppingBasket size={26} />
-          </div>
-          <h1 className="text-4xl font-black leading-tight">App Supermarket</h1>
-          <div className="mt-8 grid gap-3 text-sm text-white/85">
-            <MetricLine value="Multiusuario" />
-            <MetricLine value="Checklist por conta" />
-            <MetricLine value="Historico e dashboard" />
-          </div>
+          <h1 id="auth-title">SuperList</h1>
+          <p>Suas compras sob controle</p>
         </div>
 
-        <form className="p-6 sm:p-8" onSubmit={submit}>
-          <div className="mb-6">
-            <p className="text-sm font-bold uppercase text-supermarket-leaf">
-              {mode === "login" ? "Entrar" : mode === "register" ? "Criar conta" : "Recuperar senha"}
-            </p>
-            <h2 className="mt-1 text-2xl font-black">
-              {mode === "login" ? "Acesse sua lista" : mode === "register" ? "Nova conta" : "Atualizar acesso"}
-            </h2>
-          </div>
+        <form className="auth-form" onSubmit={submit}>
+          <h2>{heading}</h2>
 
           <div className="grid gap-4">
             {mode === "register" ? (
-              <label className="field">
+              <label className="auth-field">
                 <span>Nome</span>
-                <input className="input" value={name} onChange={(event) => setName(event.target.value)} />
+                <input
+                  className="auth-input"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  autoComplete="name"
+                  required
+                />
               </label>
             ) : null}
 
-            <label className="field">
+            <label className="auth-field">
               <span>E-mail</span>
-              <input className="input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+              <div className="auth-input-shell">
+                <Mail size={21} aria-hidden="true" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="E-mail"
+                  autoComplete="email"
+                  required
+                />
+              </div>
             </label>
 
-            <label className="field">
+            <label className="auth-field">
               <span>{mode === "recover" ? "Nova senha" : "Senha"}</span>
-              <div className="password-field">
+              <div className="auth-input-shell">
+                <Lock size={21} aria-hidden="true" />
                 <input
-                  className="input pr-12"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
+                  placeholder={mode === "recover" ? "Nova senha" : "Senha"}
+                  autoComplete={mode === "login" ? "current-password" : "new-password"}
+                  required
                 />
                 <button
-                  className="password-toggle"
+                  className="auth-password-toggle"
                   type="button"
                   onClick={() => setShowPassword((current) => !current)}
                   aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
@@ -466,25 +475,28 @@ function AuthScreen({
             </label>
 
             {mode !== "login" ? (
-              <label className="field">
+              <label className="auth-field">
                 <span>Resposta de seguranca</span>
-                <input className="input" value={securityAnswer} onChange={(event) => setSecurityAnswer(event.target.value)} />
+                <input
+                  className="auth-input"
+                  value={securityAnswer}
+                  onChange={(event) => setSecurityAnswer(event.target.value)}
+                  autoComplete="off"
+                  required
+                />
               </label>
             ) : null}
           </div>
 
-          {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
-          {message ? <p className="mt-4 rounded-2xl bg-supermarket-mint p-3 text-sm font-bold text-supermarket-leaf">{message}</p> : null}
+          {error ? <p className="auth-alert auth-alert-error">{error}</p> : null}
+          {message ? <p className="auth-alert auth-alert-success">{message}</p> : null}
 
-          <button className="button-primary mt-6 w-full justify-center" type="submit">
-            {mode === "register" ? <UserPlus size={18} /> : <Save size={18} />}
-            {mode === "login" ? "Entrar" : mode === "register" ? "Criar conta" : "Salvar senha"}
+          <button className="auth-submit" type="submit" disabled={isSubmitting}>
+            {mode === "register" ? <UserPlus size={19} /> : <Save size={19} />}
+            {isSubmitting ? "Aguarde..." : buttonLabel}
           </button>
 
-          <div className="mt-5 flex flex-wrap gap-2">
-            <button className="link-button" type="button" onClick={() => onModeChange("login")}>
-              Login
-            </button>
+          <div className="auth-links">
             <button className="link-button" type="button" onClick={() => onModeChange("register")}>
               Criar conta
             </button>
@@ -492,6 +504,11 @@ function AuthScreen({
               Esqueci minha senha
             </button>
           </div>
+          {mode !== "login" ? (
+            <button className="auth-back-link" type="button" onClick={() => onModeChange("login")}>
+              Voltar para login
+            </button>
+          ) : null}
         </form>
       </section>
     </main>
@@ -994,15 +1011,6 @@ function MetricCard({ label, value }: { label: string; value: string }) {
     <div className="rounded-3xl bg-white p-4 shadow-soft">
       <p className="text-sm text-supermarket-ink/60">{label}</p>
       <strong className="text-2xl font-black">{value}</strong>
-    </div>
-  );
-}
-
-function MetricLine({ value }: { value: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <CheckCircle2 size={18} />
-      <span>{value}</span>
     </div>
   );
 }

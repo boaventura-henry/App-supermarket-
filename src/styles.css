@@ -26,6 +26,108 @@
 }
 
 @layer components {
+  .auth-screen {
+    @apply grid min-h-screen place-items-center bg-black px-5 py-8 text-white;
+    background:
+      radial-gradient(circle at 50% 22%, rgba(93, 255, 174, 0.12), transparent 30rem),
+      linear-gradient(180deg, #020403 0%, #000 68%);
+  }
+
+  .auth-card {
+    @apply w-full max-w-[430px] rounded-[2rem] border border-white/10 bg-[#020706]/95 px-6 py-10 shadow-[0_24px_80px_rgba(0,0,0,0.65)] sm:px-8;
+    animation: auth-enter 420ms ease-out both;
+  }
+
+  .auth-brand {
+    @apply mb-9 text-center;
+  }
+
+  .auth-logo {
+    @apply mx-auto mb-5 flex h-[5.8rem] w-[5.8rem] items-center justify-center rounded-[1.65rem] text-[#07120d] shadow-[0_0_28px_rgba(112,255,190,0.32)];
+    background: linear-gradient(145deg, #98ffd2 0%, #57efae 52%, #d8ffe9 100%);
+  }
+
+  .auth-brand h1 {
+    @apply text-[2.55rem] font-black leading-none tracking-normal text-[#6df7a7] sm:text-5xl;
+    text-shadow: 0 0 20px rgba(109, 247, 167, 0.28);
+  }
+
+  .auth-brand p {
+    @apply mt-3 text-base font-semibold text-white/70;
+  }
+
+  .auth-form {
+    @apply grid gap-5;
+  }
+
+  .auth-form h2 {
+    @apply mb-1 text-center text-2xl font-black text-white sm:text-[1.7rem];
+  }
+
+  .auth-field {
+    @apply grid gap-2 text-sm font-bold text-white/70;
+  }
+
+  .auth-input,
+  .auth-input-shell {
+    @apply h-16 w-full rounded-[1.35rem] border border-white/22 bg-[#020806] px-4 text-base text-white outline-none transition duration-200;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  }
+
+  .auth-input-shell {
+    @apply flex items-center gap-4;
+  }
+
+  .auth-input-shell svg {
+    @apply shrink-0 text-white/72;
+  }
+
+  .auth-input,
+  .auth-input-shell input {
+    @apply min-w-0 flex-1 bg-transparent font-semibold text-white outline-none placeholder:text-white/48;
+  }
+
+  .auth-input:focus,
+  .auth-input-shell:focus-within {
+    @apply border-[#72f8b5];
+    box-shadow:
+      0 0 0 4px rgba(114, 248, 181, 0.12),
+      0 0 22px rgba(114, 248, 181, 0.08);
+  }
+
+  .auth-password-toggle {
+    @apply -mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-white/75 transition hover:bg-white/10 hover:text-[#7dffb0];
+  }
+
+  .auth-submit {
+    @apply mt-2 inline-flex h-16 w-full items-center justify-center gap-3 rounded-[1.35rem] bg-[#78edbd] px-5 text-base font-black text-[#07120d] transition duration-200 hover:-translate-y-0.5 hover:bg-[#8cffca] hover:shadow-[0_16px_36px_rgba(120,237,189,0.22)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none;
+  }
+
+  .auth-links {
+    @apply mt-5 flex items-center justify-between gap-4;
+  }
+
+  .auth-links .link-button,
+  .auth-back-link {
+    @apply rounded-xl px-1 py-1 text-sm font-black text-[#9afbd0] underline decoration-[#9afbd0]/70 underline-offset-4 transition hover:text-white;
+  }
+
+  .auth-back-link {
+    @apply mx-auto -mt-2 block;
+  }
+
+  .auth-alert {
+    @apply rounded-[1.2rem] px-4 py-3 text-sm font-bold;
+  }
+
+  .auth-alert-error {
+    @apply border border-red-400/25 bg-red-500/10 text-red-100;
+  }
+
+  .auth-alert-success {
+    @apply border border-[#72f8b5]/25 bg-[#72f8b5]/10 text-[#b8ffda];
+  }
+
   .button-primary {
     @apply inline-flex min-h-11 items-center gap-2 rounded-2xl bg-supermarket-leaf px-5 py-3 font-bold text-white transition hover:bg-supermarket-ink disabled:cursor-not-allowed disabled:bg-supermarket-ink/30;
   }
@@ -236,5 +338,17 @@
 
   .theme-dark svg text {
     fill: rgba(233, 255, 243, 0.72);
+  }
+
+  @keyframes auth-enter {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.98);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
 }
