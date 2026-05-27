@@ -35,8 +35,16 @@ jobs:
       - name: Build project
         run: npm run build
 
+      - name: Validate Netlify secrets
+        run: |
+          test -n "$NETLIFY_AUTH_TOKEN"
+          test -n "$NETLIFY_SITE_ID"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
       - name: Deploy to Netlify
-        run: npx netlify deploy --prod --dir=dist --functions=netlify/functions --site="$NETLIFY_SITE_ID" --auth="$NETLIFY_AUTH_TOKEN"
+        run: npx netlify deploy --prod --dir=dist --functions=netlify/functions
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
