@@ -15,6 +15,7 @@
     margin: 0;
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f7f4ec;
   }
 
   button,
@@ -26,24 +27,24 @@
 
 @layer components {
   .button-primary {
-    @apply inline-flex min-h-11 items-center gap-2 rounded bg-supermarket-leaf px-5 py-3 font-bold text-white transition hover:bg-supermarket-ink disabled:cursor-not-allowed disabled:bg-supermarket-ink/30;
+    @apply inline-flex min-h-11 items-center gap-2 rounded-2xl bg-supermarket-leaf px-5 py-3 font-bold text-white transition hover:bg-supermarket-ink disabled:cursor-not-allowed disabled:bg-supermarket-ink/30;
   }
 
   .button-secondary {
-    @apply inline-flex min-h-11 items-center gap-2 rounded border border-supermarket-ink/15 bg-white px-4 py-2 font-bold text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
+    @apply inline-flex min-h-11 items-center gap-2 rounded-2xl border border-supermarket-ink/15 bg-white px-4 py-2 font-bold text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
   }
 
   .danger-button {
-    @apply inline-flex min-h-10 items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-2 font-bold text-red-700 transition hover:bg-red-100;
+    @apply inline-flex min-h-10 items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-2 font-bold text-red-700 transition hover:bg-red-100;
   }
 
   .link-button {
-    @apply rounded px-2 py-1 text-sm font-bold text-supermarket-leaf transition hover:bg-supermarket-mint;
+    @apply rounded-xl px-2 py-1 text-sm font-bold text-supermarket-leaf transition hover:bg-supermarket-mint;
   }
 
   .nav-button,
   .nav-button-active {
-    @apply min-h-10 rounded border px-4 py-2 text-sm font-bold transition;
+    @apply min-h-10 rounded-2xl border px-4 py-2 text-sm font-bold transition;
   }
 
   .nav-button {
@@ -55,7 +56,7 @@
   }
 
   .input {
-    @apply h-11 w-full rounded border border-supermarket-ink/15 bg-white px-3 text-supermarket-ink outline-none transition placeholder:text-supermarket-ink/45 focus:border-supermarket-leaf focus:ring-4 focus:ring-supermarket-leaf/15;
+    @apply h-12 w-full rounded-2xl border border-supermarket-ink/15 bg-white px-4 text-supermarket-ink outline-none transition placeholder:text-supermarket-ink/45 focus:border-supermarket-leaf focus:ring-4 focus:ring-supermarket-leaf/15;
   }
 
   .field {
@@ -67,12 +68,16 @@
   }
 
   .password-toggle {
-    @apply absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-supermarket-ink/45 transition hover:bg-supermarket-mint hover:text-supermarket-leaf;
+    @apply absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-xl text-supermarket-ink/45 transition hover:bg-supermarket-mint hover:text-supermarket-leaf;
+  }
+
+  .theme-toggle {
+    @apply inline-flex min-h-10 items-center gap-2 rounded-2xl border border-supermarket-ink/15 bg-white px-4 py-2 text-sm font-bold text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
   }
 
   .status-bought,
   .status-pending {
-    @apply flex h-11 w-11 shrink-0 items-center justify-center rounded border transition;
+    @apply flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition;
   }
 
   .status-bought {
@@ -84,11 +89,11 @@
   }
 
   .icon-button {
-    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded border border-supermarket-ink/10 bg-white text-supermarket-ink/60 transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-supermarket-ink/10 bg-white text-supermarket-ink/60 transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
   }
 
   .product-row {
-    @apply flex flex-col gap-4 rounded bg-white p-4 shadow-soft transition sm:flex-row sm:items-center;
+    @apply flex flex-col gap-4 rounded-3xl bg-white p-4 shadow-soft transition sm:flex-row sm:items-center;
   }
 
   .product-row-done {
@@ -100,11 +105,11 @@
   }
 
   .panel {
-    @apply rounded bg-white p-5 shadow-soft;
+    @apply rounded-3xl bg-white p-5 shadow-soft;
   }
 
   .history-row {
-    @apply flex w-full items-start justify-between gap-4 rounded bg-white p-4 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg;
+    @apply flex w-full items-start justify-between gap-4 rounded-3xl bg-white p-4 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg;
   }
 
   .history-row small {
@@ -112,14 +117,124 @@
   }
 
   .chart-shell {
-    @apply overflow-hidden rounded border border-supermarket-ink/10 bg-white p-3;
+    @apply overflow-hidden rounded-3xl border border-supermarket-ink/10 bg-white p-3;
   }
 
   .chart-chip {
-    @apply rounded bg-supermarket-mint px-2 py-1 text-xs font-bold text-supermarket-leaf;
+    @apply rounded-xl bg-supermarket-mint px-2 py-1 text-xs font-bold text-supermarket-leaf;
   }
 
   .empty-chart {
-    @apply rounded border border-dashed border-supermarket-ink/20 p-8 text-center font-bold text-supermarket-ink/55;
+    @apply rounded-3xl border border-dashed border-supermarket-ink/20 p-8 text-center font-bold text-supermarket-ink/55;
+  }
+
+  .theme-dark {
+    color: #e9fff3;
+    background: #000;
+  }
+
+  .theme-dark body,
+  .theme-dark.bg-supermarket-paper,
+  .theme-dark .bg-supermarket-paper {
+    background: #000;
+  }
+
+  .theme-dark header,
+  .theme-dark .bg-white,
+  .theme-dark .panel,
+  .theme-dark .product-row,
+  .theme-dark .history-row,
+  .theme-dark .chart-shell {
+    background: #07100d;
+    color: #e9fff3;
+    border-color: rgba(125, 255, 176, 0.22);
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.52);
+  }
+
+  .theme-dark .bg-supermarket-leaf,
+  .theme-dark .button-primary,
+  .theme-dark .nav-button-active,
+  .theme-dark .status-bought {
+    background: #6df7a7;
+    border-color: #6df7a7;
+    color: #00170d;
+  }
+
+  .theme-dark .bg-supermarket-leaf,
+  .theme-dark .bg-supermarket-leaf * {
+    color: #00170d;
+  }
+
+  .theme-dark .bg-supermarket-mint,
+  .theme-dark .chart-chip {
+    background: rgba(109, 247, 167, 0.16);
+  }
+
+  .theme-dark .input,
+  .theme-dark select,
+  .theme-dark input {
+    background: #020806;
+    color: #e9fff3;
+    border-color: rgba(125, 255, 176, 0.28);
+  }
+
+  .theme-dark .input::placeholder {
+    color: rgba(233, 255, 243, 0.48);
+  }
+
+  .theme-dark .button-secondary,
+  .theme-dark .nav-button,
+  .theme-dark .theme-toggle,
+  .theme-dark .icon-button,
+  .theme-dark .status-pending {
+    background: #020806;
+    color: #d9ffe8;
+    border-color: rgba(125, 255, 176, 0.3);
+  }
+
+  .theme-dark .button-secondary:hover,
+  .theme-dark .nav-button:hover,
+  .theme-dark .theme-toggle:hover,
+  .theme-dark .icon-button:hover,
+  .theme-dark .status-pending:hover,
+  .theme-dark .link-button,
+  .theme-dark [class*="text-supermarket-leaf"] {
+    color: #7dffb0;
+  }
+
+  .theme-dark [class*="text-supermarket-ink"] {
+    color: rgba(233, 255, 243, 0.72);
+  }
+
+  .theme-dark .text-supermarket-ink,
+  .theme-dark h1,
+  .theme-dark h2,
+  .theme-dark h3,
+  .theme-dark strong {
+    color: #f3fff8;
+  }
+
+  .theme-dark .danger-button {
+    background: rgba(127, 29, 29, 0.28);
+    border-color: rgba(252, 165, 165, 0.34);
+    color: #fecaca;
+  }
+
+  .theme-dark .empty-chart,
+  .theme-dark .rounded.border-dashed {
+    background: #020806;
+    border-color: rgba(125, 255, 176, 0.28);
+  }
+
+  .theme-dark svg path[stroke="#1f6f55"] {
+    stroke: #7dffb0;
+  }
+
+  .theme-dark svg circle[fill="#1f6f55"] {
+    fill: #7dffb0;
+  }
+
+  .theme-dark svg text {
+    fill: rgba(233, 255, 243, 0.72);
   }
 }

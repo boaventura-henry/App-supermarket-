@@ -8,11 +8,13 @@ import {
   EyeOff,
   History,
   LogOut,
+  Moon,
   Plus,
   Save,
   Search,
   ShoppingBasket,
   Store,
+  Sun,
   Trash2,
   UserPlus
 } from "lucide-react";
@@ -28,6 +30,7 @@ import {
 import type { AppDatabase, PriceHistory, Product, User, View } from "./types";
 
 type AuthMode = "login" | "register" | "recover";
+type ThemeMode = "light" | "dark";
 
 type ProductForm = {
   name: string;
@@ -74,6 +77,10 @@ function quantity(value: number) {
   return Number.isInteger(value) ? value.toString() : value.toFixed(2).replace(".", ",");
 }
 
+function loadTheme(): ThemeMode {
+  return localStorage.getItem("app-supermarket-theme") === "dark" ? "dark" : "light";
+}
+
 export function App() {
   const [database, setDatabase] = useState<AppDatabase>(() => loadDatabase());
   const [view, setView] = useState<View>("list");
@@ -81,10 +88,18 @@ export function App() {
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
 
   useEffect(() => {
     saveDatabase(database);
   }, [database]);
+
+  useEffect(() => {
+    localStorage.setItem("app-supermarket-theme", theme);
+  }, [theme]);
+
+  const themeClass = theme === "dark" ? "theme-dark" : "theme-light";
+  const toggleTheme = () => setTheme((current) => (current === "dark" ? "light" : "dark"));
 
   const currentUser = useMemo(
     () => database.users.find((user) => user.uid === database.activeUserId) ?? null,
@@ -269,6 +284,9 @@ export function App() {
         onLogin={handleLogin}
         onRegister={handleRegister}
         onRecover={handleRecover}
+        theme={theme}
+        themeClass={themeClass}
+        onToggleTheme={toggleTheme}
       />
     );
   }
@@ -278,11 +296,11 @@ export function App() {
     : null;
 
   return (
-    <main className="min-h-screen bg-supermarket-paper text-supermarket-ink">
+    <main className={`${themeClass} min-h-screen bg-supermarket-paper text-supermarket-ink`}>
       <header className="sticky top-0 z-20 border-b border-supermarket-ink/10 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded bg-supermarket-leaf text-white">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-supermarket-leaf text-white">
               <ShoppingBasket size={24} />
             </div>
             <div>
@@ -291,6 +309,7 @@ export function App() {
             </div>
           </div>
           <nav className="flex flex-wrap gap-2">
+            <ThemeButton theme={theme} onToggle={toggleTheme} />
             <NavButton active={view === "list"} onClick={() => setView("list")}>
               Lista
             </NavButton>
@@ -349,7 +368,10 @@ function AuthScreen({
   onModeChange,
   onLogin,
   onRegister,
-  onRecover
+  onRecover,
+  theme,
+  themeClass,
+  onToggleTheme
 }: {
   mode: AuthMode;
   error: string;
@@ -358,6 +380,9 @@ function AuthScreen({
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (name: string, email: string, password: string, securityAnswer: string) => Promise<void>;
   onRecover: (email: string, securityAnswer: string, newPassword: string) => Promise<void>;
+  theme: ThemeMode;
+  themeClass: string;
+  onToggleTheme: () => void;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -379,10 +404,13 @@ function AuthScreen({
   }
 
   return (
-    <main className="grid min-h-screen bg-supermarket-paper px-4 py-8 text-supermarket-ink sm:place-items-center">
-      <section className="grid w-full max-w-5xl overflow-hidden rounded bg-white shadow-soft lg:grid-cols-[0.9fr_1.1fr]">
+    <main className={`${themeClass} grid min-h-screen bg-supermarket-paper px-4 py-8 text-supermarket-ink sm:place-items-center`}>
+      <section className="grid w-full max-w-5xl overflow-hidden rounded-[2rem] bg-white shadow-soft lg:grid-cols-[0.9fr_1.1fr]">
         <div className="bg-supermarket-leaf p-8 text-white">
-          <div className="mb-8 flex h-12 w-12 items-center justify-center rounded bg-white/15">
+          <div className="mb-6 flex justify-end">
+            <ThemeButton theme={theme} onToggle={onToggleTheme} />
+          </div>
+          <div className="mb-8 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15">
             <ShoppingBasket size={26} />
           </div>
           <h1 className="text-4xl font-black leading-tight">App Supermarket</h1>
@@ -445,8 +473,8 @@ function AuthScreen({
             ) : null}
           </div>
 
-          {error ? <p className="mt-4 rounded bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
-          {message ? <p className="mt-4 rounded bg-supermarket-mint p-3 text-sm font-bold text-supermarket-leaf">{message}</p> : null}
+          {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+          {message ? <p className="mt-4 rounded-2xl bg-supermarket-mint p-3 text-sm font-bold text-supermarket-leaf">{message}</p> : null}
 
           <button className="button-primary mt-6 w-full justify-center" type="submit">
             {mode === "register" ? <UserPlus size={18} /> : <Save size={18} />}
@@ -557,7 +585,7 @@ function ShoppingList({
               <button className="min-w-0 flex-1 text-left" type="button" onClick={() => onEdit(product.id)}>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="truncate text-lg font-black">{product.name}</h2>
-                  <span className="rounded bg-supermarket-mint px-2 py-1 text-xs font-bold text-supermarket-leaf">
+                  <span className="rounded-xl bg-supermarket-mint px-2 py-1 text-xs font-bold text-supermarket-leaf">
                     {product.brand}
                   </span>
                 </div>
@@ -621,7 +649,7 @@ function ProductEditor({
 
   return (
     <section className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
-      <form className="rounded bg-white p-5 shadow-soft" onSubmit={submit}>
+      <form className="rounded-[2rem] bg-white p-5 shadow-soft" onSubmit={submit}>
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
             <p className="text-sm font-bold uppercase text-supermarket-leaf">{product ? "Editar" : "Cadastro"}</p>
@@ -658,7 +686,7 @@ function ProductEditor({
           </label>
         </div>
 
-        {error ? <p className="mt-4 rounded bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+        {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
 
         <div className="mt-6 flex flex-wrap gap-3">
           <button className="button-primary" type="submit">
@@ -892,8 +920,8 @@ function BarComparison({ items }: { items: { label: string; value: number }[] })
             <strong>{item.label}</strong>
             <span>{money(item.value)}</span>
           </div>
-          <div className="h-3 overflow-hidden rounded bg-supermarket-mint">
-            <div className="h-full rounded bg-supermarket-leaf" style={{ width: `${(item.value / max) * 100}%` }} />
+          <div className="h-3 overflow-hidden rounded-full bg-supermarket-mint">
+            <div className="h-full rounded-full bg-supermarket-leaf" style={{ width: `${(item.value / max) * 100}%` }} />
           </div>
         </div>
       ))}
@@ -946,9 +974,24 @@ function NavButton({ active, children, onClick }: { active: boolean; children: R
   );
 }
 
+function ThemeButton({ theme, onToggle }: { theme: ThemeMode; onToggle: () => void }) {
+  return (
+    <button
+      className="theme-toggle"
+      type="button"
+      onClick={onToggle}
+      aria-label={theme === "dark" ? "Ativar modo claro" : "Ativar modo escuro"}
+      title={theme === "dark" ? "Modo claro" : "Modo escuro"}
+    >
+      {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+      <span>{theme === "dark" ? "Claro" : "Escuro"}</span>
+    </button>
+  );
+}
+
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded bg-white p-4 shadow-soft">
+    <div className="rounded-3xl bg-white p-4 shadow-soft">
       <p className="text-sm text-supermarket-ink/60">{label}</p>
       <strong className="text-2xl font-black">{value}</strong>
     </div>
@@ -975,7 +1018,7 @@ function Summary({ label, value }: { label: string; value: string }) {
 
 function EmptyState({ action, onClick }: { action?: string; onClick?: () => void }) {
   return (
-    <div className="rounded border border-dashed border-supermarket-ink/20 bg-white p-8 text-center">
+    <div className="rounded-3xl border border-dashed border-supermarket-ink/20 bg-white p-8 text-center">
       <ShoppingBasket className="mx-auto text-supermarket-leaf" size={36} />
       <p className="mt-3 font-bold text-supermarket-ink/70">Nenhum registro encontrado.</p>
       {action && onClick ? (
