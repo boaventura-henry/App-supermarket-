@@ -16,15 +16,50 @@
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
 }
 
 @layer components {
+  .button-primary {
+    @apply inline-flex min-h-11 items-center gap-2 rounded bg-supermarket-leaf px-5 py-3 font-bold text-white transition hover:bg-supermarket-ink disabled:cursor-not-allowed disabled:bg-supermarket-ink/30;
+  }
+
   .button-secondary {
-    @apply min-h-11 items-center gap-2 rounded border border-supermarket-ink/15 bg-white px-5 py-3 font-bold text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
+    @apply inline-flex min-h-11 items-center gap-2 rounded border border-supermarket-ink/15 bg-white px-4 py-2 font-bold text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
+  }
+
+  .danger-button {
+    @apply inline-flex min-h-10 items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-2 font-bold text-red-700 transition hover:bg-red-100;
+  }
+
+  .link-button {
+    @apply rounded px-2 py-1 text-sm font-bold text-supermarket-leaf transition hover:bg-supermarket-mint;
+  }
+
+  .nav-button,
+  .nav-button-active {
+    @apply min-h-10 rounded border px-4 py-2 text-sm font-bold transition;
+  }
+
+  .nav-button {
+    @apply border-supermarket-ink/10 bg-white text-supermarket-ink/70 hover:border-supermarket-leaf hover:text-supermarket-leaf;
+  }
+
+  .nav-button-active {
+    @apply border-supermarket-leaf bg-supermarket-leaf text-white;
   }
 
   .input {
     @apply h-11 w-full rounded border border-supermarket-ink/15 bg-white px-3 text-supermarket-ink outline-none transition placeholder:text-supermarket-ink/45 focus:border-supermarket-leaf focus:ring-4 focus:ring-supermarket-leaf/15;
+  }
+
+  .field {
+    @apply grid gap-2 text-sm font-bold text-supermarket-ink/70;
   }
 
   .status-bought,
@@ -38,5 +73,45 @@
 
   .status-pending {
     @apply border-supermarket-ink/15 bg-white text-supermarket-ink/45 hover:border-supermarket-leaf hover:text-supermarket-leaf;
+  }
+
+  .icon-button {
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded border border-supermarket-ink/10 bg-white text-supermarket-ink/60 transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
+  }
+
+  .product-row {
+    @apply flex flex-col gap-4 rounded bg-white p-4 shadow-soft transition sm:flex-row sm:items-center;
+  }
+
+  .product-row-done {
+    @apply opacity-60;
+  }
+
+  .product-row-done h2 {
+    @apply line-through;
+  }
+
+  .panel {
+    @apply rounded bg-white p-5 shadow-soft;
+  }
+
+  .history-row {
+    @apply flex w-full items-start justify-between gap-4 rounded bg-white p-4 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg;
+  }
+
+  .history-row small {
+    @apply mt-1 block text-sm font-normal text-supermarket-ink/60;
+  }
+
+  .chart-shell {
+    @apply overflow-hidden rounded border border-supermarket-ink/10 bg-white p-3;
+  }
+
+  .chart-chip {
+    @apply rounded bg-supermarket-mint px-2 py-1 text-xs font-bold text-supermarket-leaf;
+  }
+
+  .empty-chart {
+    @apply rounded border border-dashed border-supermarket-ink/20 p-8 text-center font-bold text-supermarket-ink/55;
   }
 }

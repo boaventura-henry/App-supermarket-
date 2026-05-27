@@ -12,7 +12,9 @@ O repositorio original e um projeto Android Kotlin com Gradle Kotlin DSL:
 - Telas principais: autenticacao, lista de compras, cadastro/edicao de produtos, dashboard e historico de precos
 - Entidades principais: `User`, `Product` e `PriceHistory`
 
-Como a Netlify hospeda frontend estatico e funcoes serverless, o app Android foi preservado e foi criada uma camada web em React + Vite + TypeScript + Tailwind na raiz do repositorio. A interface web reaproveita os conceitos do app Android: produto, marca, quantidade, preco unitario, mercado, item comprado, dashboard e historico.
+Como a Netlify hospeda frontend estatico e funcoes serverless, o app Android foi preservado e foi criada uma camada web em React + Vite + TypeScript + Tailwind na raiz do repositorio. A interface web reaproveita os conceitos do app Android: autenticacao, produto, marca, quantidade, preco unitario, mercado, item comprado, dashboard e historico.
+
+Na versao Netlify, os dados ficam em um banco local do navegador (`localStorage`) com todos os registros separados por `userId`. Isso permite uso multiusuario no mesmo navegador sem depender de credenciais externas. Para sincronizacao entre dispositivos, a camada `src/storage.ts` pode ser substituida por Firebase, Supabase ou outro backend persistente mantendo os mesmos tipos de dominio.
 
 ## Por que Vite + React
 
@@ -27,6 +29,7 @@ Vite + React foi escolhido porque a camada Netlify precisa ser uma SPA rapida, e
 |-- netlify/functions/           # Serverless functions
 |-- public/_redirects            # SPA fallback e API redirect
 |-- src/                         # Frontend web React
+|   |-- storage.ts               # Banco local e isolamento por usuario
 |-- index.html
 |-- package.json
 |-- netlify.toml
@@ -44,6 +47,18 @@ npm run dev
 ```
 
 Abra `http://localhost:5173`.
+
+## Funcionalidades da versao web
+
+- Login, criacao de conta, recuperacao de senha e logout.
+- Dados isolados por UID de usuario.
+- Cadastro, edicao e exclusao de produtos.
+- Campos: produto, marca, quantidade, valor unitario, supermercado e data automatica.
+- Checklist com status comprado/nao comprado.
+- Filtros por produto, supermercado e status.
+- Historico automatico de precos a cada cadastro/edicao.
+- Historico com filtros por produto, supermercado e mes.
+- Dashboard com variacao mensal de precos e comparacao entre supermercados.
 
 ## Validar antes do deploy
 
