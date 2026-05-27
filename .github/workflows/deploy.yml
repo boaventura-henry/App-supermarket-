@@ -1,21 +1,25 @@
-name: Deploy to Netlify
+name: CI
 
 on:
   push:
     branches:
       - main
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
-  group: netlify-production-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  build-and-deploy:
-    name: Build and deploy
+  web:
+    name: Web lint and build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -25,6 +29,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
+          cache: npm
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -34,17 +39,3 @@ jobs:
 
       - name: Build project
         run: npm run build
-
-      - name: Validate Netlify secrets
-        run: |
-          test -n "$NETLIFY_AUTH_TOKEN"
-          test -n "$NETLIFY_SITE_ID"
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-
-      - name: Deploy to Netlify
-        run: npx netlify deploy --prod --dir=dist --functions=netlify/functions
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
