@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
+  ArrowUpDown,
   BarChart3,
   CheckCircle2,
   Circle,
@@ -39,6 +40,9 @@ type ThemeMode = "light" | "dark";
 
 type ProductForm = {
   name: string;
+  quantity: string;
+  unitPrice: string;
+  supermarket: string;
 };
 
 type ListForm = {
@@ -46,7 +50,12 @@ type ListForm = {
   color: string;
 };
 
-type ProductSort = "name" | "quantity";
+type ProductSortField = "name" | "quantity";
+
+type ProductSort = {
+  field: ProductSortField;
+  direction: "asc" | "desc";
+};
 
 const currency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -65,7 +74,10 @@ const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
 });
 
 const emptyProductForm: ProductForm = {
-  name: ""
+  name: "",
+  quantity: "",
+  unitPrice: "",
+  supermarket: ""
 };
 
 const emptyListForm: ListForm = {
@@ -78,12 +90,21 @@ function money(value: number) {
 }
 
 function parseMoney(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.includes(",") ? trimmed.replace(/\./g, "").replace(",", ".") : trimmed;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function parseOptionalNumber(value: string) {
   if (!value.trim()) {
     return null;
   }
-  const normalized = value.replace(/\./g, "").replace(",", ".");
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
+  const parsed = Number(value.replace(",", "."));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function loadTheme(): ThemeMode {
@@ -98,7 +119,6 @@ export function App() {
   const [authError, setAuthError] = useState("");
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [editingListId, setEditingListId] = useState<string | null>(null);
-  const [productModalListId, setProductModalListId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -209,7 +229,6 @@ export function App() {
     setView("list");
     setSelectedListId(null);
     setEditingListId(null);
-    setProductModalListId(null);
     setIsMenuOpen(false);
   }
 
@@ -274,6 +293,15 @@ export function App() {
     if (!name) {
       throw new Error("Informe a descricao do produto.");
     }
+    const quantity = parseOptionalNumber(form.quantity);
+    if (quantity === undefined) {
+      throw new Error("Informe uma quantidade valida ou deixe em branco.");
+    }
+    const unitPrice = parseMoney(form.unitPrice);
+    if (unitPrice === undefined) {
+      throw new Error("Informe um valor unitario valido ou deixe em branco.");
+    }
+    const supermarket = form.supermarket.trim();
     const timestamp = Date.now();
     updateDatabase((current) => {
       const product: Product = {
@@ -282,19 +310,35 @@ export function App() {
         listId,
         name,
         brand: "",
-        quantity: null,
-        unitPrice: null,
-        supermarket: "Nao informado",
+        quantity,
+        unitPrice,
+        supermarket,
         timestamp,
         isBought: false
       };
+      const history: PriceHistory[] =
+        unitPrice !== null && unitPrice > 0
+          ? [
+              ...current.priceHistory,
+              {
+                id: createId("hist"),
+                userId: currentUser.uid,
+                listId,
+                productName: name,
+                brand: "",
+                price: unitPrice,
+                supermarket,
+                timestamp
+              }
+            ]
+          : current.priceHistory;
       return {
         ...current,
         products: [...current.products, product],
+        priceHistory: history,
         lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
       };
     });
-    setProductModalListId(null);
   }
 
   function deleteProduct(productId: string) {
@@ -326,8 +370,8 @@ export function App() {
       return;
     }
 
-    const parsed = field === "quantity" ? Number(value.replace(",", ".")) : parseMoney(value);
-    const nextValue = value.trim() === "" || parsed === null || !Number.isFinite(parsed) || parsed < 0 ? null : parsed;
+    const parsed = field === "quantity" ? parseOptionalNumber(value) : parseMoney(value);
+    const nextValue = value.trim() === "" || parsed === null || parsed === undefined ? null : parsed;
     const timestamp = Date.now();
 
     updateDatabase((current) => {
@@ -338,7 +382,7 @@ export function App() {
 
       const updated = { ...target, [field]: nextValue };
       const history =
-        field === "unitPrice" && nextValue !== null
+        field === "unitPrice" && nextValue !== null && nextValue > 0
           ? [
               ...current.priceHistory,
               {
@@ -431,7 +475,7 @@ export function App() {
           onCancelList={() => setEditingListId(null)}
           onSaveList={saveShoppingList}
           onDeleteList={deleteShoppingList}
-          onAddProduct={setProductModalListId}
+          onSaveProduct={saveProduct}
           onToggleBought={toggleBought}
           onInlineChange={updateProductInline}
           onDeleteProduct={deleteProduct}
@@ -439,13 +483,6 @@ export function App() {
       ) : null}
 
       {view === "shared" ? <SharedLists users={database.users} lists={database.lists} products={database.products} currentUserId={currentUser.uid} /> : null}
-
-      {productModalListId ? (
-        <ProductModal
-          onCancel={() => setProductModalListId(null)}
-          onSave={(form) => saveProduct(productModalListId, form)}
-        />
-      ) : null}
 
       {view === "dashboard" ? <Dashboard products={userData.products} priceHistory={userData.priceHistory} /> : null}
 
@@ -621,7 +658,7 @@ function ShoppingList({
   onCancelList,
   onSaveList,
   onDeleteList,
-  onAddProduct,
+  onSaveProduct,
   onToggleBought,
   onInlineChange,
   onDeleteProduct
@@ -636,12 +673,12 @@ function ShoppingList({
   onCancelList: () => void;
   onSaveList: (form: ListForm) => void;
   onDeleteList: (listId: string) => void;
-  onAddProduct: (listId: string) => void;
+  onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, field: "quantity" | "unitPrice", value: string) => void;
   onDeleteProduct: (productId: string) => void;
 }) {
-  const [sortBy, setSortBy] = useState<ProductSort>("name");
+  const [sort, setSort] = useState<ProductSort>({ field: "name", direction: "asc" });
   const selectedList = lists.find((list) => list.id === selectedListId) ?? lists[0] ?? null;
   const listProducts = useMemo(() => {
     if (!selectedList) {
@@ -649,12 +686,21 @@ function ShoppingList({
     }
     const scopedProducts = products.filter((product) => product.listId === selectedList.id);
     return scopedProducts.slice().sort((a, b) => {
-      if (sortBy === "quantity") {
-        return (a.quantity ?? Number.MAX_SAFE_INTEGER) - (b.quantity ?? Number.MAX_SAFE_INTEGER);
-      }
-      return a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
+      const result =
+        sort.field === "quantity"
+          ? (a.quantity ?? Number.MAX_SAFE_INTEGER) - (b.quantity ?? Number.MAX_SAFE_INTEGER)
+          : a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
+      return sort.direction === "asc" ? result : -result;
     });
-  }, [products, selectedList, sortBy]);
+  }, [products, selectedList, sort]);
+
+  function toggleSort(field: ProductSortField) {
+    setSort((current) =>
+      current.field === field
+        ? { field, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { field, direction: "asc" }
+    );
+  }
 
   const total = listProducts.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
   const boughtCount = listProducts.filter((product) => product.isBought).length;
@@ -716,17 +762,9 @@ function ShoppingList({
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <select className="compact-select" value={sortBy} onChange={(event) => setSortBy(event.target.value as ProductSort)}>
-                <option value="name">Ordenar por nome</option>
-                <option value="quantity">Ordenar por quantidade</option>
-              </select>
               <button className="button-secondary" type="button" onClick={() => onEditList(selectedList.id)}>
                 <Edit3 size={16} />
                 Lista
-              </button>
-              <button className="button-primary" type="button" onClick={() => onAddProduct(selectedList.id)}>
-                <Plus size={16} />
-                Produto
               </button>
               <button className="danger-button" type="button" onClick={() => onDeleteList(selectedList.id)}>
                 <Trash2 size={16} />
@@ -735,21 +773,25 @@ function ShoppingList({
             </div>
           </div>
 
+          <ProductQuickForm onSave={(form) => onSaveProduct(selectedList.id, form)} />
+
           <div className="compact-product-list">
             <div className="compact-product-header">
               <span />
-              <button className="sort-header" type="button" onClick={() => setSortBy("name")}>
+              <button className="sort-header" type="button" onClick={() => toggleSort("name")}>
                 Produto
+                <SortIndicator active={sort.field === "name"} direction={sort.direction} />
               </button>
-              <button className="sort-header" type="button" onClick={() => setSortBy("quantity")}>
+              <button className="sort-header" type="button" onClick={() => toggleSort("quantity")}>
                 Qtd.
+                <SortIndicator active={sort.field === "quantity"} direction={sort.direction} />
               </button>
               <span>Valor un.</span>
-              <span>Total</span>
+              <span>Supermercado</span>
               <span />
             </div>
             {listProducts.length === 0 ? (
-              <EmptyState action="Cadastrar produto" onClick={() => onAddProduct(selectedList.id)} />
+              <EmptyState />
             ) : (
               listProducts.map((product) => (
                 <div className={product.isBought ? "compact-product-row compact-product-row-done" : "compact-product-row"} key={product.id}>
@@ -778,8 +820,9 @@ function ShoppingList({
                     aria-label={`Valor unitario de ${product.name}`}
                     onChange={(event) => onInlineChange(product.id, "unitPrice", event.target.value)}
                   />
-                  <span className="font-bold">
-                    {product.quantity !== null && product.unitPrice !== null ? money(product.quantity * product.unitPrice) : "-"}
+                  <span className="inline-flex min-w-0 items-center gap-1 truncate text-sm font-semibold text-supermarket-ink/65">
+                    <Store size={14} className="shrink-0 text-supermarket-leaf" />
+                    <span className="truncate">{product.supermarket || "-"}</span>
                   </span>
                   <button className="icon-button" type="button" onClick={() => onDeleteProduct(product.id)} aria-label="Excluir produto">
                     <Trash2 size={16} />
@@ -791,6 +834,88 @@ function ShoppingList({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function ProductQuickForm({ onSave }: { onSave: (form: ProductForm) => void }) {
+  const [form, setForm] = useState<ProductForm>(emptyProductForm);
+  const [error, setError] = useState("");
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      onSave(form);
+      setForm(emptyProductForm);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel salvar o produto.");
+    }
+  }
+
+  return (
+    <form className="product-entry-panel" onSubmit={submit}>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold uppercase text-supermarket-leaf">Produto</p>
+          <h4 className="text-lg font-black">Cadastrar item</h4>
+        </div>
+        <ShoppingCart className="text-supermarket-leaf" size={22} />
+      </div>
+      <div className="product-entry-grid">
+        <label className="field">
+          <span>Nome do produto *</span>
+          <input
+            className="input"
+            value={form.name}
+            onChange={(event) => setForm({ ...form, name: event.target.value })}
+            placeholder="Ex.: Arroz, leite, cafe..."
+          />
+        </label>
+        <label className="field">
+          <span>Quantidade</span>
+          <input
+            className="input"
+            inputMode="decimal"
+            value={form.quantity}
+            onChange={(event) => setForm({ ...form, quantity: event.target.value })}
+            placeholder="Opcional"
+          />
+        </label>
+        <label className="field">
+          <span>Valor unitario</span>
+          <input
+            className="input"
+            inputMode="decimal"
+            value={form.unitPrice}
+            onChange={(event) => setForm({ ...form, unitPrice: event.target.value })}
+            placeholder="Opcional"
+          />
+        </label>
+        <label className="field">
+          <span>Supermercado</span>
+          <input
+            className="input"
+            value={form.supermarket}
+            onChange={(event) => setForm({ ...form, supermarket: event.target.value })}
+            placeholder="Opcional"
+          />
+        </label>
+      </div>
+      {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+      <button className="button-primary mt-4 w-full justify-center sm:w-auto" type="submit">
+        <Plus size={18} />
+        Adicionar produto
+      </button>
+    </form>
+  );
+}
+
+function SortIndicator({ active, direction }: { active: boolean; direction: ProductSort["direction"] }) {
+  return (
+    <span className={active ? "sort-indicator sort-indicator-active" : "sort-indicator"} aria-hidden="true">
+      <ArrowUpDown size={13} />
+      {active ? direction.toUpperCase() : null}
+    </span>
   );
 }
 
@@ -835,62 +960,6 @@ function ListEditor({ list, onCancel, onSave }: { list: ShoppingList | null; onC
         </button>
       </div>
     </form>
-  );
-}
-
-function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (form: ProductForm) => void }) {
-  const [form, setForm] = useState<ProductForm>(emptyProductForm);
-  const [error, setError] = useState("");
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    try {
-      onSave(form);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel salvar.");
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <form className="product-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="product-modal-title">
-        <div className="mb-5 flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-bold uppercase text-supermarket-leaf">Produto</p>
-            <h2 id="product-modal-title" className="text-2xl font-black">
-              Cadastrar produto
-            </h2>
-          </div>
-          <button className="side-menu-close" type="button" onClick={onCancel} aria-label="Fechar">
-            <X size={20} />
-          </button>
-        </div>
-
-        <label className="field">
-          <span>Descricao do produto</span>
-          <input
-            className="input"
-            value={form.name}
-            onChange={(event) => setForm({ name: event.target.value })}
-            placeholder="Ex.: Arroz, leite, cafe..."
-            autoFocus
-          />
-        </label>
-
-        {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
-
-        <div className="mt-6 flex gap-3">
-          <button className="button-primary" type="submit">
-            <Save size={18} />
-            Salvar
-          </button>
-          <button className="button-secondary" type="button" onClick={onCancel}>
-            Cancelar
-          </button>
-        </div>
-      </form>
-    </div>
   );
 }
 

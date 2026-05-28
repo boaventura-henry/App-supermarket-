@@ -293,16 +293,24 @@
 
   .compact-product-header,
   .compact-product-row {
-    @apply grid min-w-[42rem] items-center gap-2 px-3;
-    grid-template-columns: 2.2rem minmax(0, 1fr) 5rem 6rem 4.7rem 2.6rem;
+    @apply grid min-w-[48rem] items-center gap-2 px-3;
+    grid-template-columns: 2.2rem minmax(12rem, 1fr) 5.2rem 6.3rem minmax(9rem, 0.8fr) 2.8rem;
   }
 
   .compact-product-header {
-    @apply bg-supermarket-mint/50 py-2 text-xs font-black uppercase text-supermarket-ink/60;
+    @apply sticky top-0 z-10 bg-supermarket-mint/80 py-2 text-xs font-black uppercase text-supermarket-ink/60 backdrop-blur;
   }
 
   .sort-header {
-    @apply text-left text-xs font-black uppercase text-supermarket-ink/60 transition hover:text-supermarket-leaf;
+    @apply inline-flex items-center gap-1 text-left text-xs font-black uppercase text-supermarket-ink/60 transition hover:text-supermarket-leaf;
+  }
+
+  .sort-indicator {
+    @apply inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[0.62rem] text-supermarket-ink/40;
+  }
+
+  .sort-indicator-active {
+    @apply bg-supermarket-leaf/10 text-supermarket-leaf;
   }
 
   .compact-product-row {
@@ -323,6 +331,14 @@
 
   .color-input {
     @apply h-12 w-full rounded-2xl border border-supermarket-ink/15 bg-white p-1;
+  }
+
+  .product-entry-panel {
+    @apply mb-5 rounded-[1.6rem] border border-supermarket-ink/10 bg-white p-4 shadow-soft;
+  }
+
+  .product-entry-grid {
+    @apply grid gap-3 md:grid-cols-[minmax(14rem,1.4fr)_minmax(7rem,0.6fr)_minmax(8rem,0.75fr)_minmax(10rem,1fr)];
   }
 
   .modal-backdrop {
@@ -383,6 +399,7 @@
   .theme-dark header,
   .theme-dark .bg-white,
   .theme-dark .panel,
+  .theme-dark .product-entry-panel,
   .theme-dark .shopping-list-card,
   .theme-dark .shopping-list-card-active,
   .theme-dark .compact-product-list,
@@ -498,7 +515,8 @@
 
   .theme-dark .compact-product-row,
   .theme-dark .compact-product-list,
-  .theme-dark .shared-list-row {
+  .theme-dark .shared-list-row,
+  .theme-dark .product-entry-panel {
     border-color: rgba(125, 255, 176, 0.16);
   }
 
