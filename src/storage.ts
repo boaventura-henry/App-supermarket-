@@ -1,9 +1,10 @@
-import type { AppDatabase, PriceHistory, Product, User } from "./types";
+import type { AppDatabase, PriceHistory, Product, ShoppingList, User } from "./types";
 
 const DB_KEY = "app-supermarket-db-v2";
 
 const emptyDb: AppDatabase = {
   users: [],
+  lists: [],
   products: [],
   priceHistory: [],
   activeUserId: null
@@ -29,12 +30,13 @@ export function loadDatabase(): AppDatabase {
     }
 
     const parsed = JSON.parse(stored) as Partial<AppDatabase>;
-    return {
+    return normalizeDatabase({
       users: parsed.users ?? [],
+      lists: parsed.lists ?? [],
       products: parsed.products ?? [],
       priceHistory: parsed.priceHistory ?? [],
       activeUserId: parsed.activeUserId ?? null
-    };
+    });
   } catch {
     return emptyDb;
   }
@@ -46,6 +48,7 @@ export function saveDatabase(database: AppDatabase) {
 
 export function getUserData(database: AppDatabase, userId: string) {
   return {
+    lists: database.lists.filter((list) => list.userId === userId),
     products: database.products.filter((product) => product.userId === userId),
     priceHistory: database.priceHistory.filter((history) => history.userId === userId)
   };
@@ -57,6 +60,48 @@ export function normalizeEmail(email: string) {
 
 export function sortByNewest<T extends Product | PriceHistory>(items: T[]) {
   return items.slice().sort((a, b) => b.timestamp - a.timestamp);
+}
+
+function normalizeDatabase(database: AppDatabase): AppDatabase {
+  const lists = [...database.lists];
+  const products = database.products.map((product) => ({ ...product }));
+
+  for (const user of database.users) {
+    const userProducts = products.filter((product) => product.userId === user.uid);
+    const hasUserList = lists.some((list) => list.userId === user.uid);
+    if (userProducts.length > 0 && !hasUserList) {
+      lists.push(createDefaultList(user.uid));
+    }
+
+    const defaultList = lists.find((list) => list.userId === user.uid);
+    if (defaultList) {
+      for (const product of userProducts) {
+        if (!product.listId) {
+          product.listId = defaultList.id;
+        }
+        product.quantity = Number.isFinite(product.quantity) ? product.quantity : null;
+        product.unitPrice = Number.isFinite(product.unitPrice) ? product.unitPrice : null;
+      }
+    }
+  }
+
+  return {
+    ...database,
+    lists,
+    products
+  };
+}
+
+function createDefaultList(userId: string): ShoppingList {
+  const now = Date.now();
+  return {
+    id: createId("list"),
+    userId,
+    name: "Minha lista",
+    color: "#6df7a7",
+    createdAt: now,
+    updatedAt: now
+  };
 }
 
 export function omitUserSensitiveFields(user: User) {

@@ -32,18 +32,21 @@ import {
   saveDatabase,
   sortByNewest
 } from "./storage";
-import type { AppDatabase, PriceHistory, Product, User, View } from "./types";
+import type { AppDatabase, PriceHistory, Product, ShoppingList, User, View } from "./types";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
 
 type ProductForm = {
   name: string;
-  brand: string;
-  quantity: string;
-  unitPrice: string;
-  supermarket: string;
 };
+
+type ListForm = {
+  name: string;
+  color: string;
+};
+
+type ProductSort = "name" | "quantity";
 
 const currency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -62,11 +65,12 @@ const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
 });
 
 const emptyProductForm: ProductForm = {
+  name: ""
+};
+
+const emptyListForm: ListForm = {
   name: "",
-  brand: "",
-  quantity: "1",
-  unitPrice: "",
-  supermarket: ""
+  color: "#6df7a7"
 };
 
 function money(value: number) {
@@ -74,12 +78,12 @@ function money(value: number) {
 }
 
 function parseMoney(value: string) {
+  if (!value.trim()) {
+    return null;
+  }
   const normalized = value.replace(/\./g, "").replace(",", ".");
-  return Number(normalized);
-}
-
-function quantity(value: number) {
-  return Number.isInteger(value) ? value.toString() : value.toFixed(2).replace(".", ",");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function loadTheme(): ThemeMode {
@@ -92,7 +96,9 @@ export function App() {
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
-  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [selectedListId, setSelectedListId] = useState<string | null>(null);
+  const [editingListId, setEditingListId] = useState<string | null>(null);
+  const [productModalListId, setProductModalListId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -114,10 +120,22 @@ export function App() {
 
   const userData = useMemo(() => {
     if (!currentUser) {
-      return { products: [], priceHistory: [] };
+      return { lists: [], products: [], priceHistory: [] };
     }
     return getUserData(database, currentUser.uid);
   }, [currentUser, database]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    if (!selectedListId && userData.lists.length > 0) {
+      setSelectedListId(userData.lists[0].id);
+    }
+    if (selectedListId && !userData.lists.some((list) => list.id === selectedListId)) {
+      setSelectedListId(userData.lists[0]?.id ?? null);
+    }
+  }, [currentUser, selectedListId, userData.lists]);
 
   function updateDatabase(updater: (database: AppDatabase) => AppDatabase) {
     setDatabase((current) => updater(current));
@@ -189,7 +207,9 @@ export function App() {
   function logout() {
     updateDatabase((current) => ({ ...current, activeUserId: null }));
     setView("list");
-    setSelectedProductId(null);
+    setSelectedListId(null);
+    setEditingListId(null);
+    setProductModalListId(null);
     setIsMenuOpen(false);
   }
 
@@ -198,62 +218,83 @@ export function App() {
     setIsMenuOpen(false);
   }
 
-  function saveProduct(form: ProductForm) {
+  function saveShoppingList(form: ListForm) {
     if (!currentUser) {
       return;
     }
 
     const name = form.name.trim();
-    const brand = form.brand.trim();
-    const quantityValue = Number(form.quantity.replace(",", "."));
-    const unitPrice = parseMoney(form.unitPrice);
-    const supermarket = form.supermarket.trim() || "Nao informado";
-
-    if (!name || !brand || !Number.isFinite(quantityValue) || quantityValue <= 0 || !Number.isFinite(unitPrice) || unitPrice <= 0) {
-      throw new Error("Preencha produto, marca, quantidade e valor unitario corretamente.");
+    if (!name) {
+      throw new Error("Informe o nome da lista.");
     }
 
-    const timestamp = Date.now();
-    const history: PriceHistory = {
-      id: createId("hist"),
-      userId: currentUser.uid,
-      productName: name,
-      brand,
-      price: unitPrice,
-      supermarket,
-      timestamp
-    };
-
+    const now = Date.now();
+    const targetListId = editingListId && editingListId !== "new" ? editingListId : createId("list");
     updateDatabase((current) => {
-      const existing = selectedProductId
-        ? current.products.find((product) => product.id === selectedProductId && product.userId === currentUser.uid)
+      const existing = editingListId
+        ? current.lists.find((list) => list.id === editingListId && list.userId === currentUser.uid)
         : null;
-
-      const product: Product = {
-        id: existing?.id ?? createId("prd"),
+      const list: ShoppingList = {
+        id: existing?.id ?? targetListId,
         userId: currentUser.uid,
         name,
-        brand,
-        quantity: quantityValue,
-        unitPrice,
-        supermarket,
-        timestamp: existing?.timestamp ?? timestamp,
-        isBought: existing?.isBought ?? false
+        color: form.color,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now
       };
-
-      const products = existing
-        ? current.products.map((item) => (item.id === existing.id ? product : item))
-        : [...current.products, product];
-
       return {
         ...current,
-        products,
-        priceHistory: [...current.priceHistory, history]
+        lists: existing ? current.lists.map((item) => (item.id === existing.id ? list : item)) : [...current.lists, list]
       };
     });
 
-    setSelectedProductId(null);
-    setView("list");
+    setSelectedListId(targetListId);
+    setEditingListId(null);
+  }
+
+  function deleteShoppingList(listId: string) {
+    if (!currentUser) {
+      return;
+    }
+    updateDatabase((current) => ({
+      ...current,
+      lists: current.lists.filter((list) => !(list.id === listId && list.userId === currentUser.uid)),
+      products: current.products.filter((product) => !(product.listId === listId && product.userId === currentUser.uid)),
+      priceHistory: current.priceHistory.filter((history) => !(history.listId === listId && history.userId === currentUser.uid))
+    }));
+    setSelectedListId((current) => (current === listId ? null : current));
+    setEditingListId(null);
+  }
+
+  function saveProduct(listId: string, form: ProductForm) {
+    if (!currentUser) {
+      return;
+    }
+    const name = form.name.trim();
+    if (!name) {
+      throw new Error("Informe a descricao do produto.");
+    }
+    const timestamp = Date.now();
+    updateDatabase((current) => {
+      const product: Product = {
+        id: createId("prd"),
+        userId: currentUser.uid,
+        listId,
+        name,
+        brand: "",
+        quantity: null,
+        unitPrice: null,
+        supermarket: "Nao informado",
+        timestamp,
+        isBought: false
+      };
+      return {
+        ...current,
+        products: [...current.products, product],
+        lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
+      };
+    });
+    setProductModalListId(null);
   }
 
   function deleteProduct(productId: string) {
@@ -264,8 +305,6 @@ export function App() {
       ...current,
       products: current.products.filter((product) => !(product.id === productId && product.userId === currentUser.uid))
     }));
-    setSelectedProductId(null);
-    setView("list");
   }
 
   function toggleBought(productId: string) {
@@ -280,6 +319,48 @@ export function App() {
           : product
       )
     }));
+  }
+
+  function updateProductInline(productId: string, field: "quantity" | "unitPrice", value: string) {
+    if (!currentUser) {
+      return;
+    }
+
+    const parsed = field === "quantity" ? Number(value.replace(",", ".")) : parseMoney(value);
+    const nextValue = value.trim() === "" || parsed === null || !Number.isFinite(parsed) || parsed < 0 ? null : parsed;
+    const timestamp = Date.now();
+
+    updateDatabase((current) => {
+      const target = current.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+      if (!target) {
+        return current;
+      }
+
+      const updated = { ...target, [field]: nextValue };
+      const history =
+        field === "unitPrice" && nextValue !== null
+          ? [
+              ...current.priceHistory,
+              {
+                id: createId("hist"),
+                userId: currentUser.uid,
+                listId: target.listId,
+                productName: target.name,
+                brand: target.brand,
+                price: nextValue,
+                supermarket: target.supermarket,
+                timestamp
+              }
+            ]
+          : current.priceHistory;
+
+      return {
+        ...current,
+        products: current.products.map((product) => (product.id === productId ? updated : product)),
+        priceHistory: history,
+        lists: current.lists.map((list) => (list.id === target.listId ? { ...list, updatedAt: timestamp } : list))
+      };
+    });
   }
 
   if (!currentUser) {
@@ -299,10 +380,6 @@ export function App() {
       />
     );
   }
-
-  const selectedProduct = selectedProductId
-    ? userData.products.find((product) => product.id === selectedProductId) ?? null
-    : null;
 
   return (
     <main className={`${themeClass} min-h-screen bg-supermarket-paper text-supermarket-ink`}>
@@ -344,28 +421,29 @@ export function App() {
 
       {view === "list" ? (
         <ShoppingList
+          lists={userData.lists}
           products={userData.products}
-          onAdd={() => {
-            setSelectedProductId(null);
-            setView("form");
-          }}
-          onEdit={(productId) => {
-            setSelectedProductId(productId);
-            setView("form");
-          }}
+          selectedListId={selectedListId}
+          editingListId={editingListId}
+          onSelectList={setSelectedListId}
+          onStartList={() => setEditingListId("new")}
+          onEditList={setEditingListId}
+          onCancelList={() => setEditingListId(null)}
+          onSaveList={saveShoppingList}
+          onDeleteList={deleteShoppingList}
+          onAddProduct={setProductModalListId}
           onToggleBought={toggleBought}
+          onInlineChange={updateProductInline}
+          onDeleteProduct={deleteProduct}
         />
       ) : null}
 
-      {view === "form" ? (
-        <ProductEditor
-          product={selectedProduct}
-          onCancel={() => {
-            setSelectedProductId(null);
-            setView("list");
-          }}
-          onDelete={deleteProduct}
-          onSave={saveProduct}
+      {view === "shared" ? <SharedLists users={database.users} lists={database.lists} products={database.products} currentUserId={currentUser.uid} /> : null}
+
+      {productModalListId ? (
+        <ProductModal
+          onCancel={() => setProductModalListId(null)}
+          onSave={(form) => saveProduct(productModalListId, form)}
         />
       ) : null}
 
@@ -533,142 +611,191 @@ function AuthScreen({
 }
 
 function ShoppingList({
+  lists,
   products,
-  onAdd,
-  onEdit,
-  onToggleBought
+  selectedListId,
+  editingListId,
+  onSelectList,
+  onStartList,
+  onEditList,
+  onCancelList,
+  onSaveList,
+  onDeleteList,
+  onAddProduct,
+  onToggleBought,
+  onInlineChange,
+  onDeleteProduct
 }: {
+  lists: ShoppingList[];
   products: Product[];
-  onAdd: () => void;
-  onEdit: (productId: string) => void;
+  selectedListId: string | null;
+  editingListId: string | null;
+  onSelectList: (listId: string) => void;
+  onStartList: () => void;
+  onEditList: (listId: string) => void;
+  onCancelList: () => void;
+  onSaveList: (form: ListForm) => void;
+  onDeleteList: (listId: string) => void;
+  onAddProduct: (listId: string) => void;
   onToggleBought: (productId: string) => void;
+  onInlineChange: (productId: string, field: "quantity" | "unitPrice", value: string) => void;
+  onDeleteProduct: (productId: string) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [market, setMarket] = useState("Todos");
-  const [status, setStatus] = useState("Todos");
-
-  const markets = useMemo(
-    () => ["Todos", ...Array.from(new Set(products.map((product) => product.supermarket)))],
-    [products]
-  );
-
-  const filteredProducts = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return sortByNewest(products).filter((product) => {
-      const matchesQuery =
-        product.name.toLowerCase().includes(normalizedQuery) ||
-        product.brand.toLowerCase().includes(normalizedQuery);
-      const matchesMarket = market === "Todos" || product.supermarket === market;
-      const matchesStatus =
-        status === "Todos" ||
-        (status === "Comprados" && product.isBought) ||
-        (status === "Nao comprados" && !product.isBought);
-      return matchesQuery && matchesMarket && matchesStatus;
+  const [sortBy, setSortBy] = useState<ProductSort>("name");
+  const selectedList = lists.find((list) => list.id === selectedListId) ?? lists[0] ?? null;
+  const listProducts = useMemo(() => {
+    if (!selectedList) {
+      return [];
+    }
+    const scopedProducts = products.filter((product) => product.listId === selectedList.id);
+    return scopedProducts.slice().sort((a, b) => {
+      if (sortBy === "quantity") {
+        return (a.quantity ?? Number.MAX_SAFE_INTEGER) - (b.quantity ?? Number.MAX_SAFE_INTEGER);
+      }
+      return a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
     });
-  }, [market, products, query, status]);
+  }, [products, selectedList, sortBy]);
 
-  const total = filteredProducts.reduce((sum, product) => sum + product.quantity * product.unitPrice, 0);
-  const boughtTotal = filteredProducts
-    .filter((product) => product.isBought)
-    .reduce((sum, product) => sum + product.quantity * product.unitPrice, 0);
+  const total = listProducts.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
+  const boughtCount = listProducts.filter((product) => product.isBought).length;
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mb-5 grid gap-3 lg:grid-cols-4">
-        <MetricCard label="Itens" value={filteredProducts.length.toString()} />
-        <MetricCard label="Total" value={money(total)} />
-        <MetricCard label="Comprado" value={money(boughtTotal)} />
-        <button className="button-primary justify-center" type="button" onClick={onAdd}>
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-black">Listas de compras</h2>
+          <p className="text-supermarket-ink/60">Crie listas por compra, mercado ou ocasiao.</p>
+        </div>
+        <button className="button-primary justify-center" type="button" onClick={onStartList}>
           <Plus size={18} />
-          Adicionar
+          Nova lista
         </button>
       </div>
 
-      <div className="mb-5 grid gap-3 lg:grid-cols-[1fr_220px_220px]">
-        <label className="relative block">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-supermarket-ink/45" size={18} />
-          <input className="input pl-10" placeholder="Produto ou marca" value={query} onChange={(event) => setQuery(event.target.value)} />
-        </label>
-        <select className="input" value={market} onChange={(event) => setMarket(event.target.value)}>
-          {markets.map((item) => (
-            <option key={item}>{item}</option>
-          ))}
-        </select>
-        <select className="input" value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option>Todos</option>
-          <option>Comprados</option>
-          <option>Nao comprados</option>
-        </select>
-      </div>
+      {editingListId ? (
+        <ListEditor
+          list={editingListId === "new" ? null : lists.find((list) => list.id === editingListId) ?? null}
+          onCancel={onCancelList}
+          onSave={onSaveList}
+        />
+      ) : null}
 
-      <div className="space-y-3">
-        {filteredProducts.length === 0 ? (
-          <EmptyState action="Adicionar produto" onClick={onAdd} />
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {lists.length === 0 ? (
+          <EmptyState action="Criar primeira lista" onClick={onStartList} />
         ) : (
-          filteredProducts.map((product) => (
-            <article className={product.isBought ? "product-row product-row-done" : "product-row"} key={product.id}>
+          lists.map((list) => {
+            const count = products.filter((product) => product.listId === list.id).length;
+            return (
               <button
-                className={product.isBought ? "status-bought" : "status-pending"}
+                className={selectedList?.id === list.id ? "shopping-list-card shopping-list-card-active" : "shopping-list-card"}
+                key={list.id}
                 type="button"
-                aria-label={product.isBought ? "Comprado" : "Nao comprado"}
-                onClick={() => onToggleBought(product.id)}
+                onClick={() => onSelectList(list.id)}
+                style={{ borderColor: selectedList?.id === list.id ? list.color : undefined }}
               >
-                {product.isBought ? <CheckCircle2 size={22} /> : <Circle size={22} />}
+                <span className="list-color-dot" style={{ backgroundColor: list.color }} />
+                <strong>{list.name}</strong>
+                <small>{count} produtos</small>
               </button>
-
-              <button className="min-w-0 flex-1 text-left" type="button" onClick={() => onEdit(product.id)}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="truncate text-lg font-black">{product.name}</h2>
-                  <span className="rounded-xl bg-supermarket-mint px-2 py-1 text-xs font-bold text-supermarket-leaf">
-                    {product.brand}
-                  </span>
-                </div>
-                <p className="mt-2 flex flex-wrap gap-3 text-sm text-supermarket-ink/60">
-                  <span>{quantity(product.quantity)} un.</span>
-                  <span>x {money(product.unitPrice)}</span>
-                  <span>{product.supermarket}</span>
-                  <span>{dateFormatter.format(product.timestamp)}</span>
-                </p>
-              </button>
-
-              <div className="text-left sm:text-right">
-                <p className="text-sm text-supermarket-ink/50">Subtotal</p>
-                <strong className="text-xl text-supermarket-leaf">{money(product.quantity * product.unitPrice)}</strong>
-              </div>
-
-              <button className="icon-button" type="button" onClick={() => onEdit(product.id)} aria-label="Editar">
-                <Edit3 size={18} />
-              </button>
-            </article>
-          ))
+            );
+          })
         )}
       </div>
+
+      {selectedList ? (
+        <div className="panel">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="list-color-dot" style={{ backgroundColor: selectedList.color }} />
+              <div>
+                <h3 className="text-xl font-black">{selectedList.name}</h3>
+                <p className="text-sm text-supermarket-ink/60">
+                  {listProducts.length} produtos - {boughtCount} comprados - {money(total)}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <select className="compact-select" value={sortBy} onChange={(event) => setSortBy(event.target.value as ProductSort)}>
+                <option value="name">Ordenar por nome</option>
+                <option value="quantity">Ordenar por quantidade</option>
+              </select>
+              <button className="button-secondary" type="button" onClick={() => onEditList(selectedList.id)}>
+                <Edit3 size={16} />
+                Lista
+              </button>
+              <button className="button-primary" type="button" onClick={() => onAddProduct(selectedList.id)}>
+                <Plus size={16} />
+                Produto
+              </button>
+              <button className="danger-button" type="button" onClick={() => onDeleteList(selectedList.id)}>
+                <Trash2 size={16} />
+                Lista
+              </button>
+            </div>
+          </div>
+
+          <div className="compact-product-list">
+            <div className="compact-product-header">
+              <span />
+              <button className="sort-header" type="button" onClick={() => setSortBy("name")}>
+                Produto
+              </button>
+              <button className="sort-header" type="button" onClick={() => setSortBy("quantity")}>
+                Qtd.
+              </button>
+              <span>Valor un.</span>
+              <span>Total</span>
+              <span />
+            </div>
+            {listProducts.length === 0 ? (
+              <EmptyState action="Cadastrar produto" onClick={() => onAddProduct(selectedList.id)} />
+            ) : (
+              listProducts.map((product) => (
+                <div className={product.isBought ? "compact-product-row compact-product-row-done" : "compact-product-row"} key={product.id}>
+                  <button
+                    className={product.isBought ? "status-bought" : "status-pending"}
+                    type="button"
+                    aria-label={product.isBought ? "Comprado" : "Nao comprado"}
+                    onClick={() => onToggleBought(product.id)}
+                  >
+                    {product.isBought ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+                  </button>
+                  <strong>{product.name}</strong>
+                  <input
+                    className="inline-input"
+                    inputMode="decimal"
+                    value={product.quantity ?? ""}
+                    placeholder="-"
+                    aria-label={`Quantidade de ${product.name}`}
+                    onChange={(event) => onInlineChange(product.id, "quantity", event.target.value)}
+                  />
+                  <input
+                    className="inline-input"
+                    inputMode="decimal"
+                    value={product.unitPrice !== null ? product.unitPrice.toFixed(2).replace(".", ",") : ""}
+                    placeholder="-"
+                    aria-label={`Valor unitario de ${product.name}`}
+                    onChange={(event) => onInlineChange(product.id, "unitPrice", event.target.value)}
+                  />
+                  <span className="font-bold">
+                    {product.quantity !== null && product.unitPrice !== null ? money(product.quantity * product.unitPrice) : "-"}
+                  </span>
+                  <button className="icon-button" type="button" onClick={() => onDeleteProduct(product.id)} aria-label="Excluir produto">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
 
-function ProductEditor({
-  product,
-  onCancel,
-  onDelete,
-  onSave
-}: {
-  product: Product | null;
-  onCancel: () => void;
-  onDelete: (productId: string) => void;
-  onSave: (form: ProductForm) => void;
-}) {
-  const [form, setForm] = useState<ProductForm>(() =>
-    product
-      ? {
-          name: product.name,
-          brand: product.brand,
-          quantity: product.quantity.toString().replace(".", ","),
-          unitPrice: product.unitPrice.toFixed(2).replace(".", ","),
-          supermarket: product.supermarket === "Nao informado" ? "" : product.supermarket
-        }
-      : emptyProductForm
-  );
+function ListEditor({ list, onCancel, onSave }: { list: ShoppingList | null; onCancel: () => void; onSave: (form: ListForm) => void }) {
+  const [form, setForm] = useState<ListForm>(() => (list ? { name: list.name, color: list.color } : emptyListForm));
   const [error, setError] = useState("");
 
   function submit(event: FormEvent) {
@@ -682,47 +809,78 @@ function ProductEditor({
   }
 
   return (
-    <section className="mx-auto max-w-3xl px-4 py-6 sm:px-6 lg:px-8">
-      <form className="rounded-[2rem] bg-white p-5 shadow-soft" onSubmit={submit}>
-        <div className="mb-5 flex items-center justify-between gap-3">
+    <form className="mb-5 rounded-[2rem] bg-white p-5 shadow-soft" onSubmit={submit}>
+      <div className="mb-4">
+        <p className="text-sm font-bold uppercase text-supermarket-leaf">{list ? "Editar lista" : "Nova lista"}</p>
+        <h3 className="text-xl font-black">Dados da lista</h3>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-[1fr_160px]">
+        <label className="field">
+          <span>Nome da lista</span>
+          <input className="input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Cor</span>
+          <input className="color-input" type="color" value={form.color} onChange={(event) => setForm({ ...form, color: event.target.value })} />
+        </label>
+      </div>
+      {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+      <div className="mt-5 flex gap-3">
+        <button className="button-primary" type="submit">
+          <Save size={18} />
+          Salvar
+        </button>
+        <button className="button-secondary" type="button" onClick={onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (form: ProductForm) => void }) {
+  const [form, setForm] = useState<ProductForm>(emptyProductForm);
+  const [error, setError] = useState("");
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      onSave(form);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel salvar.");
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="product-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="product-modal-title">
+        <div className="mb-5 flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-bold uppercase text-supermarket-leaf">{product ? "Editar" : "Cadastro"}</p>
-            <h2 className="text-2xl font-black">Produto</h2>
+            <p className="text-sm font-bold uppercase text-supermarket-leaf">Produto</p>
+            <h2 id="product-modal-title" className="text-2xl font-black">
+              Cadastrar produto
+            </h2>
           </div>
-          {product ? (
-            <button className="danger-button" type="button" onClick={() => onDelete(product.id)}>
-              <Trash2 size={18} />
-              Excluir
-            </button>
-          ) : null}
+          <button className="side-menu-close" type="button" onClick={onCancel} aria-label="Fechar">
+            <X size={20} />
+          </button>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="field">
-            <span>Nome do produto</span>
-            <input className="input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
-          </label>
-          <label className="field">
-            <span>Marca</span>
-            <input className="input" value={form.brand} onChange={(event) => setForm({ ...form, brand: event.target.value })} />
-          </label>
-          <label className="field">
-            <span>Quantidade</span>
-            <input className="input" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} />
-          </label>
-          <label className="field">
-            <span>Valor unitario</span>
-            <input className="input" value={form.unitPrice} onChange={(event) => setForm({ ...form, unitPrice: event.target.value })} />
-          </label>
-          <label className="field sm:col-span-2">
-            <span>Supermercado</span>
-            <input className="input" value={form.supermarket} onChange={(event) => setForm({ ...form, supermarket: event.target.value })} />
-          </label>
-        </div>
+        <label className="field">
+          <span>Descricao do produto</span>
+          <input
+            className="input"
+            value={form.name}
+            onChange={(event) => setForm({ name: event.target.value })}
+            placeholder="Ex.: Arroz, leite, cafe..."
+            autoFocus
+          />
+        </label>
 
         {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
 
-        <div className="mt-6 flex flex-wrap gap-3">
+        <div className="mt-6 flex gap-3">
           <button className="button-primary" type="submit">
             <Save size={18} />
             Salvar
@@ -732,6 +890,50 @@ function ProductEditor({
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function SharedLists({
+  users,
+  lists,
+  products,
+  currentUserId
+}: {
+  users: User[];
+  lists: ShoppingList[];
+  products: Product[];
+  currentUserId: string;
+}) {
+  const otherLists = lists.filter((list) => list.userId !== currentUserId);
+  const userName = (userId: string) => users.find((user) => user.uid === userId)?.name ?? "Usuario";
+
+  return (
+    <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mb-5">
+        <h2 className="text-2xl font-black">Listas de outros usuarios</h2>
+        <p className="text-supermarket-ink/60">Visualize listas cadastradas por outras pessoas neste navegador.</p>
+      </div>
+      <div className="space-y-3">
+        {otherLists.length === 0 ? (
+          <EmptyState />
+        ) : (
+          otherLists.map((list) => {
+            const count = products.filter((product) => product.listId === list.id).length;
+            return (
+              <article className="shared-list-row" key={list.id}>
+                <span className="list-color-dot" style={{ backgroundColor: list.color }} />
+                <div className="min-w-0 flex-1">
+                  <strong>{list.name}</strong>
+                  <small>
+                    {userName(list.userId)} - {count} produtos
+                  </small>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
     </section>
   );
 }
@@ -766,7 +968,7 @@ function Dashboard({ products, priceHistory }: { products: Product[]; priceHisto
 
   const monthly = useMemo(() => buildMonthlySeries(filteredHistory), [filteredHistory]);
   const comparison = useMemo(() => buildMarketComparison(filteredHistory), [filteredHistory]);
-  const total = products.reduce((sum, product) => sum + product.quantity * product.unitPrice, 0);
+  const total = products.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
   const bought = products.filter((product) => product.isBought).length;
 
   return (
@@ -831,7 +1033,7 @@ function HistoryView({ priceHistory }: { priceHistory: PriceHistory[] }) {
     return sortByNewest(priceHistory).filter((item) => {
       const matchesQuery =
         item.productName.toLowerCase().includes(normalizedQuery) ||
-        item.brand.toLowerCase().includes(normalizedQuery);
+        (item.brand ?? "").toLowerCase().includes(normalizedQuery);
       const matchesMarket = market === "Todos" || item.supermarket === market;
       const matchesMonth = month === "Todos" || monthKey(item.timestamp) === month;
       return matchesQuery && matchesMarket && matchesMonth;
@@ -866,7 +1068,7 @@ function HistoryView({ priceHistory }: { priceHistory: PriceHistory[] }) {
               <button className="history-row" type="button" key={item.id} onClick={() => setSelected(item)}>
                 <span>
                   <strong>{item.productName}</strong>
-                  <small>{item.brand} · {item.supermarket}</small>
+                  <small>{[item.brand, item.supermarket].filter(Boolean).join(" - ")}</small>
                 </span>
                 <span className="text-right">
                   <strong>{money(item.price)}</strong>
@@ -885,7 +1087,7 @@ function HistoryView({ priceHistory }: { priceHistory: PriceHistory[] }) {
           {selected ? (
             <div className="space-y-3">
               <Summary label="Produto" value={selected.productName} />
-              <Summary label="Marca" value={selected.brand} />
+              <Summary label="Marca" value={selected.brand || "-"} />
               <Summary label="Supermercado" value={selected.supermarket} />
               <Summary label="Valor" value={money(selected.price)} />
               <Summary label="Data" value={dateFormatter.format(selected.timestamp)} />
@@ -1053,6 +1255,9 @@ function SideMenu({
         <nav className="side-menu-nav" aria-label="Navegacao principal">
           <NavButton active={currentView === "list"} onClick={() => onNavigate("list")}>
             Lista
+          </NavButton>
+          <NavButton active={currentView === "shared"} onClick={() => onNavigate("shared")}>
+            Outras listas
           </NavButton>
           <NavButton active={currentView === "dashboard"} onClick={() => onNavigate("dashboard")}>
             Dashboard
