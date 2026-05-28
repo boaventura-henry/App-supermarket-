@@ -429,6 +429,7 @@ function AuthScreen({
                   className="auth-input"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
+                  placeholder="Nome"
                   autoComplete="name"
                   required
                 />
@@ -481,6 +482,7 @@ function AuthScreen({
                   className="auth-input"
                   value={securityAnswer}
                   onChange={(event) => setSecurityAnswer(event.target.value)}
+                  placeholder="Resposta de seguranca"
                   autoComplete="off"
                   required
                 />
