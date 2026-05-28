@@ -28,15 +28,16 @@ class AppRepository(
      */
     suspend fun insertProduct(product: Product): Long {
         val prodId = productDao.insertProduct(product)
-        // Automatically generate a price history entry
-        val history = PriceHistory(
-            userId = product.userId,
-            productName = product.name,
-            price = product.unitPrice,
-            supermarket = product.supermarket,
-            timestamp = product.timestamp // match product timeline
-        )
-        priceHistoryDao.insertPriceHistory(history)
+        if (product.unitPrice > 0.0) {
+            val history = PriceHistory(
+                userId = product.userId,
+                productName = product.name,
+                price = product.unitPrice,
+                supermarket = product.supermarket,
+                timestamp = product.timestamp
+            )
+            priceHistoryDao.insertPriceHistory(history)
+        }
         return prodId
     }
 
@@ -45,7 +46,7 @@ class AppRepository(
      */
     suspend fun updateProduct(product: Product, logHistory: Boolean = false) {
         productDao.updateProduct(product)
-        if (logHistory) {
+        if (logHistory && product.unitPrice > 0.0) {
             val history = PriceHistory(
                 userId = product.userId,
                 productName = product.name,

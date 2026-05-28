@@ -14,13 +14,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.MainViewModel
+import com.example.ui.ProductInputParser
 import com.example.ui.Screen
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -31,7 +31,7 @@ import java.util.Locale
 fun AddEditProductScreen(productId: Int?, viewModel: MainViewModel) {
     var name by remember { mutableStateOf("") }
     var brand by remember { mutableStateOf("") }
-    var quantityStr by remember { mutableStateOf("1") }
+    var quantityStr by remember { mutableStateOf("") }
     var unitPriceStr by remember { mutableStateOf("") }
     var supermarket by remember { mutableStateOf("") }
     
@@ -52,8 +52,8 @@ fun AddEditProductScreen(productId: Int?, viewModel: MainViewModel) {
             if (product != null) {
                 name = product.name
                 brand = product.brand
-                quantityStr = if (product.quantity % 1.0 == 0.0) product.quantity.toInt().toString() else product.quantity.toString()
-                unitPriceStr = product.unitPrice.toString()
+                quantityStr = ProductInputParser.formatOptionalDecimal(product.quantity)
+                unitPriceStr = ProductInputParser.formatOptionalDecimal(product.unitPrice)
                 supermarket = product.supermarket ?: ""
                 
                 val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
@@ -72,13 +72,13 @@ fun AddEditProductScreen(productId: Int?, viewModel: MainViewModel) {
         if (name.isBlank()) {
             validationErrorMsg = "O nome do produto é obrigatório!"
         } else {
-            val qtyVal = quantityStr.replace(",", ".").toDoubleOrNull()
-            val priceVal = unitPriceStr.replace(",", ".").toDoubleOrNull()
+            val qtyVal = ProductInputParser.parseOptionalNonNegativeDecimal(quantityStr)
+            val priceVal = ProductInputParser.parseOptionalNonNegativeDecimal(unitPriceStr)
 
-            if (qtyVal == null || qtyVal <= 0.0) {
-                validationErrorMsg = "A quantidade deve ser um valor numérico maior que zero!"
-            } else if (priceVal == null || priceVal <= 0.0) {
-                validationErrorMsg = "O valor unitário deve ser um valor numérico maior que zero!"
+            if (qtyVal == null) {
+                validationErrorMsg = "A quantidade deve ser um valor numerico valido!"
+            } else if (priceVal == null) {
+                validationErrorMsg = "O valor unitario deve ser um valor numerico valido!"
             } else {
                 viewModel.saveProduct(
                     id = productId ?: 0,
@@ -240,8 +240,8 @@ fun AddEditProductScreen(productId: Int?, viewModel: MainViewModel) {
                 OutlinedTextField(
                     value = quantityStr,
                     onValueChange = { quantityStr = it; validationErrorMsg = null },
-                    label = { Text("Quantidade *") },
-                    placeholder = { Text("Ex: 1 ou 1.5") },
+                    label = { Text("Quantidade") },
+                    placeholder = { Text("Opcional") },
                     leadingIcon = { Icon(Icons.Default.ProductionQuantityLimits, contentDescription = null) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -253,8 +253,8 @@ fun AddEditProductScreen(productId: Int?, viewModel: MainViewModel) {
                 OutlinedTextField(
                     value = unitPriceStr,
                     onValueChange = { unitPriceStr = it; validationErrorMsg = null },
-                    label = { Text("Preço Unitário (R$) *") },
-                    placeholder = { Text("Ex: 5.99") },
+                    label = { Text("Preco Unitario (R$)") },
+                    placeholder = { Text("Opcional") },
                     leadingIcon = { Icon(Icons.Default.AttachMoney, contentDescription = null) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
