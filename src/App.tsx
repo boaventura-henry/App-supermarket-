@@ -10,6 +10,7 @@ import {
   LogOut,
   Lock,
   Mail,
+  Menu,
   Moon,
   Plus,
   Save,
@@ -19,6 +20,7 @@ import {
   Store,
   Sun,
   Trash2,
+  X,
   UserPlus
 } from "lucide-react";
 import {
@@ -92,6 +94,7 @@ export function App() {
   const [authError, setAuthError] = useState("");
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   useEffect(() => {
     saveDatabase(database);
@@ -187,6 +190,12 @@ export function App() {
     updateDatabase((current) => ({ ...current, activeUserId: null }));
     setView("list");
     setSelectedProductId(null);
+    setIsMenuOpen(false);
+  }
+
+  function navigateTo(nextView: View) {
+    setView(nextView);
+    setIsMenuOpen(false);
   }
 
   function saveProduct(form: ProductForm) {
@@ -308,24 +317,30 @@ export function App() {
               <h1 className="text-xl font-black">App Supermarket</h1>
             </div>
           </div>
-          <nav className="flex flex-wrap gap-2">
-            <ThemeButton theme={theme} onToggle={toggleTheme} />
-            <NavButton active={view === "list"} onClick={() => setView("list")}>
-              Lista
-            </NavButton>
-            <NavButton active={view === "dashboard"} onClick={() => setView("dashboard")}>
-              Dashboard
-            </NavButton>
-            <NavButton active={view === "history"} onClick={() => setView("history")}>
-              Historico
-            </NavButton>
-            <button className="button-secondary" type="button" onClick={logout}>
-              <LogOut size={18} />
-              Sair
-            </button>
-          </nav>
+          <button
+            className="menu-trigger"
+            type="button"
+            onClick={() => setIsMenuOpen(true)}
+            aria-label="Abrir menu"
+            aria-expanded={isMenuOpen}
+            aria-controls="app-side-menu"
+          >
+            <Menu size={24} />
+            <span>Menu</span>
+          </button>
         </div>
       </header>
+
+      <SideMenu
+        currentView={view}
+        isOpen={isMenuOpen}
+        onClose={() => setIsMenuOpen(false)}
+        onNavigate={navigateTo}
+        onLogout={logout}
+        onToggleTheme={toggleTheme}
+        theme={theme}
+        userName={currentUser.name}
+      />
 
       {view === "list" ? (
         <ShoppingList
@@ -990,6 +1005,72 @@ function NavButton({ active, children, onClick }: { active: boolean; children: R
     <button className={active ? "nav-button-active" : "nav-button"} type="button" onClick={onClick}>
       {children}
     </button>
+  );
+}
+
+function SideMenu({
+  currentView,
+  isOpen,
+  onClose,
+  onNavigate,
+  onLogout,
+  onToggleTheme,
+  theme,
+  userName
+}: {
+  currentView: View;
+  isOpen: boolean;
+  onClose: () => void;
+  onNavigate: (view: View) => void;
+  onLogout: () => void;
+  onToggleTheme: () => void;
+  theme: ThemeMode;
+  userName: string;
+}) {
+  return (
+    <>
+      <button
+        className={isOpen ? "side-menu-overlay side-menu-overlay-open" : "side-menu-overlay"}
+        type="button"
+        aria-label="Fechar menu"
+        onClick={onClose}
+      />
+      <aside
+        id="app-side-menu"
+        className={isOpen ? "side-menu side-menu-open" : "side-menu"}
+        aria-hidden={!isOpen}
+      >
+        <div className="side-menu-header">
+          <div>
+            <p>Menu</p>
+            <h2>{userName}</h2>
+          </div>
+          <button className="side-menu-close" type="button" onClick={onClose} aria-label="Fechar menu">
+            <X size={22} />
+          </button>
+        </div>
+
+        <nav className="side-menu-nav" aria-label="Navegacao principal">
+          <NavButton active={currentView === "list"} onClick={() => onNavigate("list")}>
+            Lista
+          </NavButton>
+          <NavButton active={currentView === "dashboard"} onClick={() => onNavigate("dashboard")}>
+            Dashboard
+          </NavButton>
+          <NavButton active={currentView === "history"} onClick={() => onNavigate("history")}>
+            Historico
+          </NavButton>
+        </nav>
+
+        <div className="side-menu-footer">
+          <ThemeButton theme={theme} onToggle={onToggleTheme} />
+          <button className="side-menu-logout" type="button" onClick={onLogout}>
+            <LogOut size={18} />
+            Sair
+          </button>
+        </div>
+      </aside>
+    </>
   );
 }
 
