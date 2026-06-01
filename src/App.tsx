@@ -1227,7 +1227,7 @@ function ShoppingList({
             ))
           )}
         </div>
-        <div className="product-grid-footer product-grid-footer-sticky">
+        <div className="product-grid-footer">
           <span>Preco total da lista: <strong>{money(total)}</strong></span>
           <span>Preco atual: <strong>{money(boughtTotal)}</strong></span>
           <span>Comprados: <strong>{boughtCount}</strong></span>
