@@ -7,6 +7,16 @@ export type User = {
   createdAt: number;
 };
 
+export type PasskeyCredential = {
+  id: string;
+  userId: string;
+  email: string;
+  rawId: string;
+  label: string;
+  createdAt: number;
+  lastUsedAt?: number;
+};
+
 export type Product = {
   id: string;
   userId: string;
@@ -42,6 +52,7 @@ export type PriceHistory = {
 
 export type AppDatabase = {
   users: User[];
+  passkeys: PasskeyCredential[];
   lists: ShoppingList[];
   products: Product[];
   priceHistory: PriceHistory[];

@@ -4,6 +4,7 @@ const DB_KEY = "app-supermarket-db-v2";
 
 const emptyDb: AppDatabase = {
   users: [],
+  passkeys: [],
   lists: [],
   products: [],
   priceHistory: [],
@@ -32,6 +33,7 @@ export function loadDatabase(): AppDatabase {
     const parsed = JSON.parse(stored) as Partial<AppDatabase>;
     return normalizeDatabase({
       users: parsed.users ?? [],
+      passkeys: parsed.passkeys ?? [],
       lists: parsed.lists ?? [],
       products: parsed.products ?? [],
       priceHistory: parsed.priceHistory ?? [],
@@ -88,7 +90,8 @@ function normalizeDatabase(database: AppDatabase): AppDatabase {
   return {
     ...database,
     lists,
-    products
+    products,
+    passkeys: database.passkeys ?? []
   };
 }
 

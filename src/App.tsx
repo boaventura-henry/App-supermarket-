@@ -7,6 +7,7 @@ import {
   Edit3,
   Eye,
   EyeOff,
+  Fingerprint,
   History,
   LogOut,
   Lock,
@@ -16,6 +17,7 @@ import {
   Plus,
   Save,
   Search,
+  ShieldCheck,
   ShoppingBasket,
   ShoppingCart,
   Store,
@@ -33,7 +35,13 @@ import {
   saveDatabase,
   sortByNewest
 } from "./storage";
-import type { AppDatabase, PriceHistory, Product, ShoppingList, User, View } from "./types";
+import type { AppDatabase, PasskeyCredential, PriceHistory, Product, ShoppingList, User, View } from "./types";
+import {
+  createPasskeyForUser,
+  describePasskeyError,
+  getPasskeyAssertion,
+  getPasskeySupport
+} from "./webauthn";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
@@ -117,6 +125,10 @@ export function App() {
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
+  const [passkeyMessage, setPasskeyMessage] = useState("");
+  const [passkeyError, setPasskeyError] = useState("");
+  const [passkeySupported, setPasskeySupported] = useState(false);
+  const [isPasskeyBusy, setIsPasskeyBusy] = useState(false);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
@@ -129,6 +141,18 @@ export function App() {
   useEffect(() => {
     localStorage.setItem("app-supermarket-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    let isMounted = true;
+    getPasskeySupport().then((supported) => {
+      if (isMounted) {
+        setPasskeySupported(supported);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const themeClass = theme === "dark" ? "theme-dark" : "theme-light";
   const toggleTheme = () => setTheme((current) => (current === "dark" ? "light" : "dark"));
@@ -144,6 +168,13 @@ export function App() {
     }
     return getUserData(database, currentUser.uid);
   }, [currentUser, database]);
+
+  const currentUserPasskey = useMemo(() => {
+    if (!currentUser) {
+      return null;
+    }
+    return database.passkeys.find((passkey) => passkey.userId === currentUser.uid) ?? null;
+  }, [currentUser, database.passkeys]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -224,11 +255,64 @@ export function App() {
     setAuthMode("login");
   }
 
+  async function handlePasskeyLogin() {
+    setAuthError("");
+    setAuthMessage("");
+    setIsPasskeyBusy(true);
+    try {
+      const passkey = await getPasskeyAssertion(database.passkeys);
+      if (!passkey) {
+        setAuthError("Biometria nao encontrada. Entre com e-mail e senha para cadastrar novamente.");
+        return;
+      }
+      const user = database.users.find((item) => item.uid === passkey.userId);
+      if (!user) {
+        setAuthError("Conta vinculada a biometria nao foi encontrada.");
+        return;
+      }
+      updateDatabase((current) => ({
+        ...current,
+        activeUserId: user.uid,
+        passkeys: current.passkeys.map((item) =>
+          item.id === passkey.id ? { ...item, lastUsedAt: Date.now() } : item
+        )
+      }));
+      setView("list");
+    } catch (err) {
+      setAuthError(describePasskeyError(err));
+    } finally {
+      setIsPasskeyBusy(false);
+    }
+  }
+
+  async function handleRegisterPasskey() {
+    if (!currentUser) {
+      return;
+    }
+    setPasskeyError("");
+    setPasskeyMessage("");
+    setIsPasskeyBusy(true);
+    try {
+      const passkey = await createPasskeyForUser(currentUser);
+      updateDatabase((current) => ({
+        ...current,
+        passkeys: [...current.passkeys.filter((item) => item.userId !== currentUser.uid), passkey]
+      }));
+      setPasskeyMessage("Biometria ativada neste dispositivo.");
+    } catch (err) {
+      setPasskeyError(describePasskeyError(err));
+    } finally {
+      setIsPasskeyBusy(false);
+    }
+  }
+
   function logout() {
     updateDatabase((current) => ({ ...current, activeUserId: null }));
     setView("list");
     setSelectedListId(null);
     setEditingListId(null);
+    setPasskeyMessage("");
+    setPasskeyError("");
     setIsMenuOpen(false);
   }
 
@@ -421,6 +505,10 @@ export function App() {
         onLogin={handleLogin}
         onRegister={handleRegister}
         onRecover={handleRecover}
+        onPasskeyLogin={handlePasskeyLogin}
+        passkeySupported={passkeySupported}
+        hasPasskeys={database.passkeys.length > 0}
+        isPasskeyBusy={isPasskeyBusy}
       />
     );
   }
@@ -463,6 +551,15 @@ export function App() {
         userName={currentUser.name}
       />
 
+      <PasskeyEnrollmentBanner
+        currentUserPasskey={currentUserPasskey}
+        supported={passkeySupported}
+        busy={isPasskeyBusy}
+        message={passkeyMessage}
+        error={passkeyError}
+        onRegister={handleRegisterPasskey}
+      />
+
       {view === "list" ? (
         <ShoppingList
           lists={userData.lists}
@@ -498,7 +595,11 @@ function AuthScreen({
   onModeChange,
   onLogin,
   onRegister,
-  onRecover
+  onRecover,
+  onPasskeyLogin,
+  passkeySupported,
+  hasPasskeys,
+  isPasskeyBusy
 }: {
   mode: AuthMode;
   error: string;
@@ -507,6 +608,10 @@ function AuthScreen({
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (name: string, email: string, password: string, securityAnswer: string) => Promise<void>;
   onRecover: (email: string, securityAnswer: string, newPassword: string) => Promise<void>;
+  onPasskeyLogin: () => Promise<void>;
+  passkeySupported: boolean;
+  hasPasskeys: boolean;
+  isPasskeyBusy: boolean;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -628,6 +733,26 @@ function AuthScreen({
             {isSubmitting ? "Aguarde..." : buttonLabel}
           </button>
 
+          {mode === "login" && passkeySupported ? (
+            <div className="auth-passkey">
+              <div className="auth-separator">
+                <span />
+                <strong>ou</strong>
+                <span />
+              </div>
+              {hasPasskeys ? (
+                <button className="auth-passkey-button" type="button" onClick={onPasskeyLogin} disabled={isPasskeyBusy}>
+                  <Fingerprint size={21} />
+                  {isPasskeyBusy ? "Lendo biometria..." : "Entrar com Face ID / Digital"}
+                </button>
+              ) : (
+                <p className="auth-passkey-hint">
+                  Entre com e-mail e senha uma vez para ativar biometria neste dispositivo.
+                </p>
+              )}
+            </div>
+          ) : null}
+
           <div className="auth-links">
             <button className="link-button" type="button" onClick={() => onModeChange("register")}>
               Criar conta
@@ -644,6 +769,58 @@ function AuthScreen({
         </form>
       </section>
     </main>
+  );
+}
+
+function PasskeyEnrollmentBanner({
+  currentUserPasskey,
+  supported,
+  busy,
+  message,
+  error,
+  onRegister
+}: {
+  currentUserPasskey: PasskeyCredential | null;
+  supported: boolean;
+  busy: boolean;
+  message: string;
+  error: string;
+  onRegister: () => Promise<void>;
+}) {
+  if (!supported && !message && !error) {
+    return null;
+  }
+
+  if (currentUserPasskey && !message && !error) {
+    return null;
+  }
+
+  return (
+    <section className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 lg:px-8">
+      <div className="passkey-banner">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="passkey-icon" aria-hidden="true">
+            <ShieldCheck size={22} />
+          </div>
+          <div className="min-w-0">
+            <h2>Login com biometria</h2>
+            <p>
+              {supported
+                ? "Ative uma passkey para entrar com Face ID, digital, Touch ID ou Windows Hello neste dispositivo."
+                : "Este navegador nao informou suporte a biometria/passkeys. O login por senha continua disponivel."}
+            </p>
+            {message ? <p className="passkey-message">{message}</p> : null}
+            {error ? <p className="passkey-error">{error}</p> : null}
+          </div>
+        </div>
+        {supported && !currentUserPasskey ? (
+          <button className="button-primary justify-center" type="button" onClick={onRegister} disabled={busy}>
+            <Fingerprint size={18} />
+            {busy ? "Aguardando..." : "Ativar biometria"}
+          </button>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
