@@ -386,16 +386,24 @@
 
   .compact-product-header,
   .compact-product-row {
-    @apply grid min-w-[38rem] items-center gap-1.5 px-2 sm:gap-2 sm:px-3;
-    grid-template-columns: minmax(12rem, 1fr) 5.6rem 4rem 5.8rem 7rem;
+    @apply grid min-w-[39rem] items-center gap-1 px-1.5 sm:gap-2 sm:px-3;
+    grid-template-columns: 8.75rem 3.4rem 5.1rem 7rem 8.25rem 6.25rem;
+  }
+
+  @media (min-width: 640px) {
+    .compact-product-header,
+    .compact-product-row {
+      min-width: 48rem;
+      grid-template-columns: minmax(12rem, 1fr) 4.4rem 6.2rem 8rem 10rem 7rem;
+    }
   }
 
   .compact-product-header {
-    @apply sticky top-0 z-10 border-b border-supermarket-ink/10 bg-supermarket-mint/80 py-2 text-xs font-black uppercase text-supermarket-ink/65 backdrop-blur;
+    @apply sticky top-0 z-10 border-b border-supermarket-ink/10 bg-supermarket-mint/80 py-2 text-[0.66rem] font-black uppercase text-supermarket-ink/65 backdrop-blur sm:text-xs;
   }
 
   .sort-header {
-    @apply inline-flex items-center gap-1 text-left text-xs font-black uppercase text-supermarket-ink/60 transition hover:text-supermarket-leaf;
+    @apply inline-flex items-center gap-1 text-left text-[0.66rem] font-black uppercase text-supermarket-ink/60 transition hover:text-supermarket-leaf sm:text-xs;
   }
 
   .sort-indicator {
@@ -407,11 +415,11 @@
   }
 
   .compact-product-row {
-    @apply min-h-11 border-t border-supermarket-ink/10 py-1.5 text-sm transition hover:bg-supermarket-mint/30;
+    @apply min-h-10 border-t border-supermarket-ink/10 py-1.5 text-sm transition hover:bg-supermarket-mint/30;
   }
 
   .product-name-cell {
-    @apply flex min-w-0 items-center gap-2;
+    @apply flex min-w-0 items-center gap-1.5 sm:gap-2;
   }
 
   .product-name-cell strong {
@@ -439,7 +447,7 @@
   }
 
   .inline-value-button {
-    @apply h-8 w-full truncate rounded-xl px-2 text-left text-sm font-bold text-supermarket-ink/75 transition hover:bg-supermarket-mint/50 hover:text-supermarket-ink focus:outline-none focus:ring-2 focus:ring-supermarket-leaf/20;
+    @apply h-8 w-full truncate rounded-xl px-1.5 text-left text-sm font-bold text-supermarket-ink/75 transition hover:bg-supermarket-mint/50 hover:text-supermarket-ink focus:outline-none focus:ring-2 focus:ring-supermarket-leaf/20 sm:px-2;
   }
 
   .inline-value-money {
@@ -451,7 +459,7 @@
   }
 
   .row-actions {
-    @apply flex items-center justify-end gap-1;
+    @apply flex items-center justify-end gap-0.5 sm:gap-1;
   }
 
   .row-actions .icon-button {

@@ -1198,15 +1198,16 @@ function ShoppingList({
         <div className="compact-product-list">
           <div className="compact-product-header">
             <button className="sort-header" type="button" onClick={() => toggleSort("name")}>
-              Nome do item
+              Nome produto
               <SortIndicator active={sort.field === "name"} direction={sort.direction} />
             </button>
-            <span>R$</span>
             <button className="sort-header" type="button" onClick={() => toggleSort("quantity")}>
               Qtd
               <SortIndicator active={sort.field === "quantity"} direction={sort.direction} />
             </button>
-            <span>Total</span>
+            <span>Valor unit.</span>
+            <span>Marca</span>
+            <span>Supermercado</span>
             <span />
           </div>
           {listProducts.length === 0 ? (
@@ -1278,9 +1279,6 @@ function ProductGridRow({
 
   const parsedQuantity = parseOptionalNumber(draft.quantity);
   const parsedPrice = parseMoney(draft.unitPrice);
-  const previewQuantity = parsedQuantity === undefined || parsedQuantity === null ? 0 : parsedQuantity;
-  const previewPrice = parsedPrice === undefined || parsedPrice === null ? 0 : parsedPrice;
-  const displayTotal = isEditing ? previewQuantity * previewPrice : (product.quantity ?? 0) * (product.unitPrice ?? 0);
 
   function startEdit() {
     onRequestEdit(product.id);
@@ -1330,14 +1328,19 @@ function ProductGridRow({
         </button>
         <button className="product-name-stack product-name-edit-trigger" type="button" onClick={startEdit}>
           <strong title={product.name}>{product.name}</strong>
-          {!isEditing && [product.brand, product.supermarket].filter(Boolean).length > 0 ? (
-            <small>{[product.brand, product.supermarket].filter(Boolean).join(" - ")}</small>
-          ) : null}
           {isRecentlySaved ? <small className="row-save-feedback">Alteracoes gravadas</small> : null}
         </button>
       </div>
       {isEditing ? (
         <>
+          <input
+            className="inline-input"
+            inputMode="decimal"
+            value={draft.quantity}
+            placeholder="-"
+            aria-label={`Quantidade de ${product.name}`}
+            onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
+          />
           <input
             className="inline-input inline-input-money"
             inputMode="decimal"
@@ -1348,34 +1351,18 @@ function ProductGridRow({
           />
           <input
             className="inline-input"
-            inputMode="decimal"
-            value={draft.quantity}
-            placeholder="-"
-            aria-label={`Quantidade de ${product.name}`}
-            onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
+            value={draft.brand}
+            onChange={(event) => setDraft({ ...draft, brand: event.target.value })}
+            placeholder="Opcional"
+            aria-label={`Marca de ${product.name}`}
           />
-          <span className="line-total">{money(displayTotal)}</span>
-          <div className="compact-product-edit-panel">
-            <label className="field">
-              <span>Marca</span>
-              <input
-                className="input"
-                value={draft.brand}
-                onChange={(event) => setDraft({ ...draft, brand: event.target.value })}
-                placeholder="Opcional"
-              />
-            </label>
-            <label className="field">
-              <span>Supermercado</span>
-              <input
-                className="input"
-                value={draft.supermarket}
-                onChange={(event) => setDraft({ ...draft, supermarket: event.target.value })}
-                placeholder="Opcional"
-              />
-            </label>
-            {error ? <p className="row-edit-error">{error}</p> : null}
-          </div>
+          <input
+            className="inline-input"
+            value={draft.supermarket}
+            onChange={(event) => setDraft({ ...draft, supermarket: event.target.value })}
+            placeholder="Opcional"
+            aria-label={`Supermercado de ${product.name}`}
+          />
           <span className="row-actions">
             <button className="icon-button row-save-button" type="button" onClick={saveEdit} aria-label="Gravar produto">
               <Save size={16} />
@@ -1387,16 +1374,22 @@ function ProductGridRow({
               <Trash2 size={16} />
             </button>
           </span>
+          {error ? <p className="row-edit-error">{error}</p> : null}
         </>
       ) : (
         <>
+          <button className="inline-value-button" type="button" onClick={startEdit}>
+            {product.quantity ?? "-"}
+          </button>
           <button className="inline-value-button inline-value-money" type="button" onClick={startEdit}>
             {product.unitPrice !== null ? money(product.unitPrice) : "-"}
           </button>
           <button className="inline-value-button" type="button" onClick={startEdit}>
-            {product.quantity ?? "-"}
+            {product.brand || "-"}
           </button>
-          <span className="line-total">{money(displayTotal)}</span>
+          <button className="inline-value-button" type="button" onClick={startEdit}>
+            {product.supermarket || "-"}
+          </button>
           <span className="row-actions">
             <button className="icon-button row-save-button" type="button" onClick={saveEdit} aria-label="Gravar produto" disabled>
               <Save size={16} />
