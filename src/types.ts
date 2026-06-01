@@ -28,6 +28,7 @@ export type Product = {
   supermarket: string;
   timestamp: number;
   isBought: boolean;
+  sortOrder: number;
 };
 
 export type ShoppingList = {

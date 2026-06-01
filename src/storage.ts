@@ -89,6 +89,18 @@ function normalizeDatabase(database: AppDatabase): AppDatabase {
     }
   }
 
+  const nextOrderByList = new Map<string, number>();
+  for (const product of products) {
+    const key = `${product.userId}:${product.listId}`;
+    const currentOrder = nextOrderByList.get(key) ?? 0;
+    if (Number.isFinite(product.sortOrder)) {
+      nextOrderByList.set(key, Math.max(currentOrder, product.sortOrder + 1));
+      continue;
+    }
+    product.sortOrder = currentOrder;
+    nextOrderByList.set(key, currentOrder + 1);
+  }
+
   return {
     ...database,
     lists,
