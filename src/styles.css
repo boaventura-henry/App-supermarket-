@@ -387,7 +387,7 @@
   .compact-product-header,
   .compact-product-row {
     @apply grid min-w-[38rem] items-center gap-1.5 px-2 sm:gap-2 sm:px-3;
-    grid-template-columns: minmax(12rem, 1fr) 5.8rem 4.2rem 6.2rem 5rem;
+    grid-template-columns: minmax(12rem, 1fr) 5.6rem 4rem 5.8rem 7rem;
   }
 
   .compact-product-header {
@@ -419,7 +419,11 @@
   }
 
   .product-name-stack {
-    @apply grid min-w-0 gap-0.5;
+    @apply grid min-w-0 gap-0.5 text-left;
+  }
+
+  .product-name-edit-trigger {
+    @apply rounded-xl outline-none transition focus:ring-2 focus:ring-supermarket-leaf/20;
   }
 
   .product-name-stack small {
@@ -434,6 +438,14 @@
     @apply truncate px-2 text-sm font-bold text-supermarket-ink/75;
   }
 
+  .inline-value-button {
+    @apply h-8 w-full truncate rounded-xl px-2 text-left text-sm font-bold text-supermarket-ink/75 transition hover:bg-supermarket-mint/50 hover:text-supermarket-ink focus:outline-none focus:ring-2 focus:ring-supermarket-leaf/20;
+  }
+
+  .inline-value-money {
+    @apply text-right;
+  }
+
   .line-total {
     @apply rounded-xl bg-supermarket-mint/60 px-2 py-1 text-right text-sm font-black text-supermarket-ink/75;
   }
@@ -443,7 +455,15 @@
   }
 
   .row-actions .icon-button {
-    @apply h-9 w-9 rounded-xl;
+    @apply h-8 w-8 rounded-xl;
+  }
+
+  .row-actions .icon-button:disabled {
+    @apply cursor-not-allowed opacity-40 hover:bg-white hover:text-supermarket-ink;
+  }
+
+  .row-save-button {
+    @apply text-supermarket-leaf;
   }
 
   .compact-product-edit-panel {
@@ -461,6 +481,18 @@
   .compact-product-row-done {
     @apply opacity-70;
     background: rgba(23, 44, 36, 0.03);
+  }
+
+  .compact-product-row-active {
+    @apply border-supermarket-leaf/35 bg-supermarket-mint/35 shadow-[inset_3px_0_0_rgba(22,163,74,0.65)];
+  }
+
+  .compact-product-row-saved {
+    @apply bg-supermarket-leaf/10;
+  }
+
+  .row-save-feedback {
+    @apply text-supermarket-leaf;
   }
 
   .compact-product-row-done .product-name-cell strong {
@@ -707,6 +739,7 @@
   }
 
   .theme-dark .line-value,
+  .theme-dark .inline-value-button,
   .theme-dark .product-name-stack small,
   .theme-dark .chart-chip,
   .theme-dark .home-bar-row span {
@@ -721,6 +754,32 @@
 
   .theme-dark .compact-product-row-done {
     background: rgba(233, 255, 243, 0.04);
+  }
+
+  .theme-dark .compact-product-row-active {
+    background: rgba(109, 247, 167, 0.1);
+    border-color: rgba(125, 255, 176, 0.36);
+    box-shadow: inset 3px 0 0 rgba(125, 255, 176, 0.72);
+  }
+
+  .theme-dark .compact-product-row-saved {
+    background: rgba(125, 255, 176, 0.13);
+  }
+
+  .theme-dark .row-save-feedback,
+  .theme-dark .row-save-button {
+    color: #7dffb0;
+  }
+
+  .theme-dark .inline-value-button:hover,
+  .theme-dark .inline-value-button:focus {
+    background: rgba(109, 247, 167, 0.12);
+    color: #e9fff3;
+  }
+
+  .theme-dark .row-actions .icon-button:disabled {
+    background: #020806;
+    color: rgba(233, 255, 243, 0.45);
   }
 
   .theme-dark .compact-product-edit-panel {

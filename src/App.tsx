@@ -508,16 +508,21 @@ export function App() {
     }));
   }
 
-  function updateProductInline(productId: string, field: "brand" | "quantity" | "unitPrice" | "supermarket", value: string) {
+  function saveProductInline(productId: string, draft: ProductEditDraft) {
     if (!currentUser) {
       return;
     }
 
-    const parsed = field === "quantity" ? parseOptionalNumber(value) : field === "unitPrice" ? parseMoney(value) : value.trim();
-    if (parsed === undefined) {
+    const parsedQuantity = parseOptionalNumber(draft.quantity);
+    const parsedPrice = parseMoney(draft.unitPrice);
+    if (parsedQuantity === undefined || parsedPrice === undefined) {
       return;
     }
-    const nextValue = field === "brand" || field === "supermarket" ? parsed : value.trim() === "" || parsed === null ? null : parsed;
+
+    const nextBrand = draft.brand.trim();
+    const nextQuantity = draft.quantity.trim() === "" || parsedQuantity === null ? null : parsedQuantity;
+    const nextUnitPrice = draft.unitPrice.trim() === "" || parsedPrice === null ? null : parsedPrice;
+    const nextSupermarket = draft.supermarket.trim();
     const timestamp = Date.now();
 
     updateDatabase((current) => {
@@ -526,8 +531,15 @@ export function App() {
         return current;
       }
 
-      const updated = { ...target, [field]: nextValue };
-      const historyPrice = field === "unitPrice" && typeof nextValue === "number" && nextValue > 0 ? nextValue : null;
+      const updated: Product = {
+        ...target,
+        brand: nextBrand,
+        quantity: nextQuantity,
+        unitPrice: nextUnitPrice,
+        supermarket: nextSupermarket
+      };
+      const historyPrice =
+        typeof nextUnitPrice === "number" && nextUnitPrice > 0 && nextUnitPrice !== target.unitPrice ? nextUnitPrice : null;
       const history =
         historyPrice !== null
           ? [
@@ -537,9 +549,9 @@ export function App() {
                 userId: currentUser.uid,
                 listId: target.listId,
                 productName: target.name,
-                brand: target.brand,
+                brand: nextBrand,
                 price: historyPrice,
-                supermarket: target.supermarket,
+                supermarket: nextSupermarket,
                 timestamp
               }
             ]
@@ -671,7 +683,7 @@ export function App() {
           onDeleteList={deleteShoppingList}
           onSaveProduct={saveProduct}
           onToggleBought={toggleBought}
-          onInlineChange={updateProductInline}
+          onInlineChange={saveProductInline}
           onClearFields={clearProductFields}
           onDeleteProduct={deleteProduct}
         />
@@ -1015,13 +1027,15 @@ function ShoppingList({
   onDeleteList: (listId: string) => void;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
-  onInlineChange: (productId: string, field: "brand" | "quantity" | "unitPrice" | "supermarket", value: string) => void;
+  onInlineChange: (productId: string, draft: ProductEditDraft) => void;
   onClearFields: (listId: string, fields: ClearProductFields) => void;
   onDeleteProduct: (productId: string) => void;
 }) {
   const [sort, setSort] = useState<ProductSort>({ field: "name", direction: "asc" });
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [savedProductId, setSavedProductId] = useState<string | null>(null);
   const selectedList = selectedListId ? lists.find((list) => list.id === selectedListId) ?? null : null;
   const listProducts = useMemo(() => {
     if (!selectedList) {
@@ -1057,6 +1071,26 @@ function ShoppingList({
     }
     onSaveProduct(selectedList.id, form);
     setIsProductModalOpen(false);
+  }
+
+  function requestProductEdit(productId: string) {
+    if (editingProductId && editingProductId !== productId) {
+      const shouldDiscard = window.confirm("Descartar as alteracoes da linha atual e editar outro produto?");
+      if (!shouldDiscard) {
+        return;
+      }
+    }
+    setSavedProductId(null);
+    setEditingProductId(productId);
+  }
+
+  function confirmProductEdit(productId: string, draft: ProductEditDraft) {
+    onInlineChange(productId, draft);
+    setEditingProductId(null);
+    setSavedProductId(productId);
+    window.setTimeout(() => {
+      setSavedProductId((current) => (current === productId ? null : current));
+    }, 1600);
   }
 
   if (!selectedList) {
@@ -1182,22 +1216,12 @@ function ShoppingList({
               <ProductGridRow
                 key={product.id}
                 product={product}
+                isEditing={editingProductId === product.id}
+                isRecentlySaved={savedProductId === product.id}
+                onRequestEdit={requestProductEdit}
+                onCancelEdit={() => setEditingProductId(null)}
                 onDelete={onDeleteProduct}
-                onSave={(productId, draft) => {
-                  const original = productToEditDraft(product);
-                  if (draft.brand !== original.brand) {
-                    onInlineChange(productId, "brand", draft.brand);
-                  }
-                  if (draft.unitPrice !== original.unitPrice) {
-                    onInlineChange(productId, "unitPrice", draft.unitPrice);
-                  }
-                  if (draft.quantity !== original.quantity) {
-                    onInlineChange(productId, "quantity", draft.quantity);
-                  }
-                  if (draft.supermarket !== original.supermarket) {
-                    onInlineChange(productId, "supermarket", draft.supermarket);
-                  }
-                }}
+                onSave={confirmProductEdit}
                 onToggleBought={onToggleBought}
               />
             ))
@@ -1227,24 +1251,29 @@ function ShoppingList({
 
 function ProductGridRow({
   product,
+  isEditing,
+  isRecentlySaved,
+  onRequestEdit,
+  onCancelEdit,
   onToggleBought,
   onSave,
   onDelete
 }: {
   product: Product;
+  isEditing: boolean;
+  isRecentlySaved: boolean;
+  onRequestEdit: (productId: string) => void;
+  onCancelEdit: () => void;
   onToggleBought: (productId: string) => void;
   onSave: (productId: string, draft: ProductEditDraft) => void;
   onDelete: (productId: string) => void;
 }) {
-  const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<ProductEditDraft>(() => productToEditDraft(product));
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!isEditing) {
-      setDraft(productToEditDraft(product));
-      setError("");
-    }
+    setDraft(productToEditDraft(product));
+    setError("");
   }, [isEditing, product]);
 
   const parsedQuantity = parseOptionalNumber(draft.quantity);
@@ -1253,13 +1282,20 @@ function ProductGridRow({
   const previewPrice = parsedPrice === undefined || parsedPrice === null ? 0 : parsedPrice;
   const displayTotal = isEditing ? previewQuantity * previewPrice : (product.quantity ?? 0) * (product.unitPrice ?? 0);
 
+  function startEdit() {
+    onRequestEdit(product.id);
+  }
+
   function cancelEdit() {
     setDraft(productToEditDraft(product));
     setError("");
-    setIsEditing(false);
+    onCancelEdit();
   }
 
   function saveEdit() {
+    if (!isEditing) {
+      return;
+    }
     setError("");
     if (parsedQuantity === undefined) {
       setError("Informe uma quantidade valida ou deixe em branco.");
@@ -1270,11 +1306,19 @@ function ProductGridRow({
       return;
     }
     onSave(product.id, draft);
-    setIsEditing(false);
   }
 
   return (
-    <div className={product.isBought ? "compact-product-row compact-product-row-done" : "compact-product-row"}>
+    <div
+      className={[
+        "compact-product-row",
+        product.isBought ? "compact-product-row-done" : "",
+        isEditing ? "compact-product-row-active" : "",
+        isRecentlySaved ? "compact-product-row-saved" : ""
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <div className="product-name-cell">
         <button
           className={product.isBought ? "status-bought" : "status-pending"}
@@ -1284,12 +1328,13 @@ function ProductGridRow({
         >
           {product.isBought ? <CheckCircle2 size={18} /> : <Circle size={18} />}
         </button>
-        <span className="product-name-stack">
+        <button className="product-name-stack product-name-edit-trigger" type="button" onClick={startEdit}>
           <strong title={product.name}>{product.name}</strong>
           {!isEditing && [product.brand, product.supermarket].filter(Boolean).length > 0 ? (
             <small>{[product.brand, product.supermarket].filter(Boolean).join(" - ")}</small>
           ) : null}
-        </span>
+          {isRecentlySaved ? <small className="row-save-feedback">Alteracoes gravadas</small> : null}
+        </button>
       </div>
       {isEditing ? (
         <>
@@ -1310,7 +1355,6 @@ function ProductGridRow({
             onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
           />
           <span className="line-total">{money(displayTotal)}</span>
-          <span />
           <div className="compact-product-edit-panel">
             <label className="field">
               <span>Marca</span>
@@ -1330,25 +1374,35 @@ function ProductGridRow({
                 placeholder="Opcional"
               />
             </label>
-            <div className="row-edit-actions">
-              <button className="button-primary justify-center" type="button" onClick={saveEdit}>
-                Gravar
-              </button>
-              <button className="button-secondary justify-center" type="button" onClick={cancelEdit}>
-                Cancelar
-              </button>
-            </div>
             {error ? <p className="row-edit-error">{error}</p> : null}
           </div>
+          <span className="row-actions">
+            <button className="icon-button row-save-button" type="button" onClick={saveEdit} aria-label="Gravar produto">
+              <Save size={16} />
+            </button>
+            <button className="icon-button" type="button" onClick={cancelEdit} aria-label="Cancelar edicao">
+              <X size={16} />
+            </button>
+            <button className="icon-button" type="button" onClick={() => onDelete(product.id)} aria-label="Excluir produto">
+              <Trash2 size={16} />
+            </button>
+          </span>
         </>
       ) : (
         <>
-          <span className="line-value">{product.unitPrice !== null ? money(product.unitPrice) : "-"}</span>
-          <span className="line-value">{product.quantity ?? "-"}</span>
+          <button className="inline-value-button inline-value-money" type="button" onClick={startEdit}>
+            {product.unitPrice !== null ? money(product.unitPrice) : "-"}
+          </button>
+          <button className="inline-value-button" type="button" onClick={startEdit}>
+            {product.quantity ?? "-"}
+          </button>
           <span className="line-total">{money(displayTotal)}</span>
           <span className="row-actions">
-            <button className="icon-button" type="button" onClick={() => setIsEditing(true)} aria-label="Editar produto">
-              <Edit3 size={16} />
+            <button className="icon-button row-save-button" type="button" onClick={saveEdit} aria-label="Gravar produto" disabled>
+              <Save size={16} />
+            </button>
+            <button className="icon-button" type="button" onClick={cancelEdit} aria-label="Cancelar edicao" disabled>
+              <X size={16} />
             </button>
             <button className="icon-button" type="button" onClick={() => onDelete(product.id)} aria-label="Excluir produto">
               <Trash2 size={16} />
