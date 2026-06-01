@@ -395,6 +395,9 @@ export function App() {
       const existing = editingListId
         ? current.lists.find((list) => list.id === editingListId && list.userId === currentUser.uid)
         : null;
+      if (editingListId && editingListId !== "new" && !existing) {
+        throw new Error("Somente o criador da lista pode alterar.");
+      }
       const list: ShoppingList = {
         id: existing?.id ?? targetListId,
         userId: currentUser.uid,
@@ -430,6 +433,9 @@ export function App() {
   function saveProduct(listId: string, form: ProductForm) {
     if (!currentUser) {
       return;
+    }
+    if (!database.lists.some((list) => list.id === listId && list.userId === currentUser.uid)) {
+      throw new Error("Somente o criador da lista pode alterar.");
     }
     const name = form.name.trim();
     if (!name) {
@@ -671,7 +677,8 @@ export function App() {
         <ShoppingList
           lists={userData.lists}
           products={userData.products}
-          userName={currentUser.name}
+          users={database.users}
+          currentUserId={currentUser.uid}
           selectedListId={selectedListId}
           editingListId={editingListId}
           onSelectList={setSelectedListId}
@@ -689,7 +696,24 @@ export function App() {
         />
       ) : null}
 
-      {view === "shared" ? <SharedLists users={database.users} lists={database.lists} products={database.products} currentUserId={currentUser.uid} /> : null}
+      {view === "shared" ? (
+        <SharedLists
+          users={database.users}
+          lists={database.lists}
+          products={database.products}
+          currentUserId={currentUser.uid}
+          editingListId={editingListId}
+          onEditList={setEditingListId}
+          onCancelList={() => setEditingListId(null)}
+          onSaveList={saveShoppingList}
+          onDeleteList={deleteShoppingList}
+          onSaveProduct={saveProduct}
+          onToggleBought={toggleBought}
+          onInlineChange={saveProductInline}
+          onClearFields={clearProductFields}
+          onDeleteProduct={deleteProduct}
+        />
+      ) : null}
 
       {view === "dashboard" ? <Dashboard products={userData.products} priceHistory={userData.priceHistory} /> : null}
 
@@ -997,9 +1021,13 @@ function Home({ products }: { products: Product[] }) {
 function ShoppingList({
   lists,
   products,
-  userName,
+  users,
+  currentUserId,
   selectedListId,
   editingListId,
+  title = "Listas cadastradas",
+  description = "Escolha uma lista para abrir os itens ou crie uma nova.",
+  allowCreateList = true,
   onSelectList,
   onBackToLists,
   onStartList,
@@ -1015,9 +1043,13 @@ function ShoppingList({
 }: {
   lists: ShoppingList[];
   products: Product[];
-  userName: string;
+  users: User[];
+  currentUserId: string;
   selectedListId: string | null;
   editingListId: string | null;
+  title?: string;
+  description?: string;
+  allowCreateList?: boolean;
   onSelectList: (listId: string) => void;
   onBackToLists: () => void;
   onStartList: () => void;
@@ -1037,6 +1069,18 @@ function ShoppingList({
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [savedProductId, setSavedProductId] = useState<string | null>(null);
   const selectedList = selectedListId ? lists.find((list) => list.id === selectedListId) ?? null : null;
+  const isListOwner = selectedList ? selectedList.userId === currentUserId : true;
+  const readonlyReason = "Somente o criador da lista pode alterar.";
+  const creatorLabel = (userId: string) => {
+    const user = users.find((item) => item.uid === userId);
+    return user ? `${user.name} - ${user.email}` : "Usuario local";
+  };
+  const getListSummary = (listId: string) => {
+    const listItems = products.filter((product) => product.listId === listId);
+    const bought = listItems.filter((product) => product.isBought).length;
+    const total = listItems.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
+    return { count: listItems.length, bought, total };
+  };
   const listProducts = useMemo(() => {
     if (!selectedList) {
       return [];
@@ -1066,7 +1110,7 @@ function ShoppingList({
   const completionRate = listProducts.length > 0 ? Math.round((boughtCount / listProducts.length) * 100) : 0;
 
   function saveProductFromModal(form: ProductForm) {
-    if (!selectedList) {
+    if (!selectedList || !isListOwner) {
       return;
     }
     onSaveProduct(selectedList.id, form);
@@ -1074,6 +1118,9 @@ function ShoppingList({
   }
 
   function requestProductEdit(productId: string) {
+    if (!isListOwner) {
+      return;
+    }
     if (editingProductId && editingProductId !== productId) {
       const shouldDiscard = window.confirm("Descartar as alteracoes da linha atual e editar outro produto?");
       if (!shouldDiscard) {
@@ -1085,6 +1132,9 @@ function ShoppingList({
   }
 
   function confirmProductEdit(productId: string, draft: ProductEditDraft) {
+    if (!isListOwner) {
+      return;
+    }
     onInlineChange(productId, draft);
     setEditingProductId(null);
     setSavedProductId(productId);
@@ -1098,16 +1148,18 @@ function ShoppingList({
       <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-black">Listas cadastradas</h2>
-            <p className="text-supermarket-ink/60">Escolha uma lista para abrir os itens ou crie uma nova.</p>
+            <h2 className="text-2xl font-black">{title}</h2>
+            <p className="text-supermarket-ink/60">{description}</p>
           </div>
-          <button className="button-primary justify-center" type="button" onClick={onStartList}>
-            <Plus size={18} />
-            Nova lista
-          </button>
+          {allowCreateList ? (
+            <button className="button-primary justify-center" type="button" onClick={onStartList}>
+              <Plus size={18} />
+              Nova lista
+            </button>
+          ) : null}
         </div>
 
-        {editingListId ? (
+        {editingListId && (editingListId === "new" || lists.some((list) => list.id === editingListId && list.userId === currentUserId)) ? (
           <ListEditor
             list={editingListId === "new" ? null : lists.find((list) => list.id === editingListId) ?? null}
             onCancel={onCancelList}
@@ -1117,10 +1169,11 @@ function ShoppingList({
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {lists.length === 0 ? (
-            <EmptyState action="Criar primeira lista" onClick={onStartList} />
+            <EmptyState action={allowCreateList ? "Criar primeira lista" : undefined} onClick={allowCreateList ? onStartList : undefined} />
           ) : (
             lists.map((list) => {
-              const count = products.filter((product) => product.listId === list.id).length;
+              const summary = getListSummary(list.id);
+              const canEditList = list.userId === currentUserId;
               return (
                 <article className="shopping-list-card" key={list.id}>
                   <button className="shopping-list-card-main" type="button" onClick={() => onSelectList(list.id)}>
@@ -1128,27 +1181,32 @@ function ShoppingList({
                     <span className="min-w-0">
                       <strong>{list.name}</strong>
                       <small>
-                        {userName} - {count} {count === 1 ? "item" : "itens"}
+                        {creatorLabel(list.userId)}
+                      </small>
+                      <small>
+                        {summary.count} {summary.count === 1 ? "item" : "itens"} - {summary.bought} comprados - {money(summary.total)}
                       </small>
                     </span>
                   </button>
-                  <div className="list-card-actions">
-                    <button className="icon-button" type="button" onClick={() => onEditList(list.id)} aria-label="Editar lista">
-                      <Edit3 size={16} />
-                    </button>
-                    <button
-                      className="icon-button danger-icon-button"
-                      type="button"
-                      onClick={() => {
-                        if (window.confirm(`Excluir a lista "${list.name}"?`)) {
-                          onDeleteList(list.id);
-                        }
-                      }}
-                      aria-label="Excluir lista"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
+                  {canEditList ? (
+                    <div className="list-card-actions">
+                      <button className="icon-button" type="button" onClick={() => onEditList(list.id)} aria-label="Editar lista">
+                        <Edit3 size={16} />
+                      </button>
+                      <button
+                        className="icon-button danger-icon-button"
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm(`Excluir a lista "${list.name}"?`)) {
+                            onDeleteList(list.id);
+                          }
+                        }}
+                        aria-label="Excluir lista"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               );
             })
@@ -1167,7 +1225,7 @@ function ShoppingList({
             <p className="text-sm font-black uppercase text-supermarket-leaf">Lista</p>
             <h2 className="text-2xl font-black">{selectedList.name}</h2>
             <p className="text-sm text-supermarket-ink/60">
-              {listProducts.length} itens - {boughtCount} comprados - {money(total)}
+              {creatorLabel(selectedList.userId)} - {listProducts.length} itens - {boughtCount} comprados - {money(total)}
             </p>
           </div>
         </div>
@@ -1175,18 +1233,24 @@ function ShoppingList({
           <button className="list-back-button" type="button" onClick={onBackToLists}>
             Voltar
           </button>
-          <button className="button-secondary" type="button" onClick={() => setIsClearModalOpen(true)}>
-            <RefreshCcw size={16} />
-            Limpar campos
-          </button>
-          <button className="button-primary" type="button" onClick={() => setIsProductModalOpen(true)}>
-            <Plus size={16} />
-            Produto
-          </button>
+          {isListOwner ? (
+            <>
+              <button className="button-secondary" type="button" onClick={() => setIsClearModalOpen(true)}>
+                <RefreshCcw size={16} />
+                Limpar campos
+              </button>
+              <button className="button-primary" type="button" onClick={() => setIsProductModalOpen(true)}>
+                <Plus size={16} />
+                Produto
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
 
-      {editingListId ? (
+      {!isListOwner ? <div className="readonly-banner">Visualizacao somente leitura. Apenas o criador pode alterar esta lista.</div> : null}
+
+      {isListOwner && editingListId ? (
         <ListEditor
           list={editingListId === "new" ? null : lists.find((list) => list.id === editingListId) ?? null}
           onCancel={onCancelList}
@@ -1217,8 +1281,10 @@ function ShoppingList({
               <ProductGridRow
                 key={product.id}
                 product={product}
-                isEditing={editingProductId === product.id}
+                isEditing={isListOwner && editingProductId === product.id}
                 isRecentlySaved={savedProductId === product.id}
+                readOnly={!isListOwner}
+                readOnlyReason={readonlyReason}
                 onRequestEdit={requestProductEdit}
                 onCancelEdit={() => setEditingProductId(null)}
                 onDelete={onDeleteProduct}
@@ -1236,8 +1302,8 @@ function ShoppingList({
         </div>
       </div>
 
-      {isProductModalOpen ? <ProductModal onCancel={() => setIsProductModalOpen(false)} onSave={saveProductFromModal} /> : null}
-      {isClearModalOpen ? (
+      {isListOwner && isProductModalOpen ? <ProductModal onCancel={() => setIsProductModalOpen(false)} onSave={saveProductFromModal} /> : null}
+      {isListOwner && isClearModalOpen ? (
         <ClearFieldsModal
           onCancel={() => setIsClearModalOpen(false)}
           onConfirm={(fields) => {
@@ -1254,6 +1320,8 @@ function ProductGridRow({
   product,
   isEditing,
   isRecentlySaved,
+  readOnly,
+  readOnlyReason,
   onRequestEdit,
   onCancelEdit,
   onToggleBought,
@@ -1263,6 +1331,8 @@ function ProductGridRow({
   product: Product;
   isEditing: boolean;
   isRecentlySaved: boolean;
+  readOnly: boolean;
+  readOnlyReason: string;
   onRequestEdit: (productId: string) => void;
   onCancelEdit: () => void;
   onToggleBought: (productId: string) => void;
@@ -1281,6 +1351,9 @@ function ProductGridRow({
   const parsedPrice = parseMoney(draft.unitPrice);
 
   function startEdit() {
+    if (readOnly) {
+      return;
+    }
     onRequestEdit(product.id);
   }
 
@@ -1291,7 +1364,7 @@ function ProductGridRow({
   }
 
   function saveEdit() {
-    if (!isEditing) {
+    if (!isEditing || readOnly) {
       return;
     }
     setError("");
@@ -1322,11 +1395,19 @@ function ProductGridRow({
           className={product.isBought ? "status-bought" : "status-pending"}
           type="button"
           aria-label={product.isBought ? "Comprado" : "Nao comprado"}
+          title={readOnly ? readOnlyReason : undefined}
+          disabled={readOnly}
           onClick={() => onToggleBought(product.id)}
         >
           {product.isBought ? <CheckCircle2 size={18} /> : <Circle size={18} />}
         </button>
-        <button className="product-name-stack product-name-edit-trigger" type="button" onClick={startEdit}>
+        <button
+          className="product-name-stack product-name-edit-trigger"
+          type="button"
+          onClick={startEdit}
+          disabled={readOnly}
+          title={readOnly ? readOnlyReason : undefined}
+        >
           <strong title={product.name}>{product.name}</strong>
           {isRecentlySaved ? <small className="row-save-feedback">Alteracoes gravadas</small> : null}
         </button>
@@ -1378,29 +1459,41 @@ function ProductGridRow({
         </>
       ) : (
         <>
-          <button className="inline-value-button" type="button" onClick={startEdit}>
+          <button className="inline-value-button" type="button" onClick={startEdit} disabled={readOnly} title={readOnly ? readOnlyReason : undefined}>
             {product.quantity ?? "-"}
           </button>
-          <button className="inline-value-button inline-value-money" type="button" onClick={startEdit}>
+          <button
+            className="inline-value-button inline-value-money"
+            type="button"
+            onClick={startEdit}
+            disabled={readOnly}
+            title={readOnly ? readOnlyReason : undefined}
+          >
             {product.unitPrice !== null ? money(product.unitPrice) : "-"}
           </button>
-          <button className="inline-value-button" type="button" onClick={startEdit}>
+          <button className="inline-value-button" type="button" onClick={startEdit} disabled={readOnly} title={readOnly ? readOnlyReason : undefined}>
             {product.brand || "-"}
           </button>
-          <button className="inline-value-button" type="button" onClick={startEdit}>
+          <button className="inline-value-button" type="button" onClick={startEdit} disabled={readOnly} title={readOnly ? readOnlyReason : undefined}>
             {product.supermarket || "-"}
           </button>
-          <span className="row-actions">
-            <button className="icon-button row-save-button" type="button" onClick={saveEdit} aria-label="Gravar produto" disabled>
-              <Save size={16} />
-            </button>
-            <button className="icon-button" type="button" onClick={cancelEdit} aria-label="Cancelar edicao" disabled>
-              <X size={16} />
-            </button>
-            <button className="icon-button" type="button" onClick={() => onDelete(product.id)} aria-label="Excluir produto">
-              <Trash2 size={16} />
-            </button>
-          </span>
+          {readOnly ? (
+            <span className="row-actions readonly-actions" title={readOnlyReason}>
+              Somente leitura
+            </span>
+          ) : (
+            <span className="row-actions">
+              <button className="icon-button row-save-button" type="button" onClick={saveEdit} aria-label="Gravar produto" disabled>
+                <Save size={16} />
+              </button>
+              <button className="icon-button" type="button" onClick={cancelEdit} aria-label="Cancelar edicao" disabled>
+                <X size={16} />
+              </button>
+              <button className="icon-button" type="button" onClick={() => onDelete(product.id)} aria-label="Excluir produto">
+                <Trash2 size={16} />
+              </button>
+            </span>
+          )}
         </>
       )}
     </div>
@@ -1639,43 +1732,95 @@ function SharedLists({
   users,
   lists,
   products,
-  currentUserId
+  currentUserId,
+  editingListId,
+  onEditList,
+  onCancelList,
+  onSaveList,
+  onDeleteList,
+  onSaveProduct,
+  onToggleBought,
+  onInlineChange,
+  onClearFields,
+  onDeleteProduct
 }: {
   users: User[];
   lists: ShoppingList[];
   products: Product[];
   currentUserId: string;
+  editingListId: string | null;
+  onEditList: (listId: string) => void;
+  onCancelList: () => void;
+  onSaveList: (form: ListForm) => void;
+  onDeleteList: (listId: string) => void;
+  onSaveProduct: (listId: string, form: ProductForm) => void;
+  onToggleBought: (productId: string) => void;
+  onInlineChange: (productId: string, draft: ProductEditDraft) => void;
+  onClearFields: (listId: string, fields: ClearProductFields) => void;
+  onDeleteProduct: (productId: string) => void;
 }) {
-  const otherLists = lists.filter((list) => list.userId !== currentUserId);
-  const userName = (userId: string) => users.find((user) => user.uid === userId)?.name ?? "Usuario";
+  return (
+    <SharedListsContent
+      users={users}
+      lists={lists}
+      products={products}
+      currentUserId={currentUserId}
+      editingListId={editingListId}
+      onEditList={onEditList}
+      onCancelList={onCancelList}
+      onSaveList={onSaveList}
+      onDeleteList={onDeleteList}
+      onSaveProduct={onSaveProduct}
+      onToggleBought={onToggleBought}
+      onInlineChange={onInlineChange}
+      onClearFields={onClearFields}
+      onDeleteProduct={onDeleteProduct}
+    />
+  );
+}
+
+function SharedListsContent(props: {
+  users: User[];
+  lists: ShoppingList[];
+  products: Product[];
+  currentUserId: string;
+  editingListId: string | null;
+  onEditList: (listId: string) => void;
+  onCancelList: () => void;
+  onSaveList: (form: ListForm) => void;
+  onDeleteList: (listId: string) => void;
+  onSaveProduct: (listId: string, form: ProductForm) => void;
+  onToggleBought: (productId: string) => void;
+  onInlineChange: (productId: string, draft: ProductEditDraft) => void;
+  onClearFields: (listId: string, fields: ClearProductFields) => void;
+  onDeleteProduct: (productId: string) => void;
+}) {
+  const [selectedSharedListId, setSelectedSharedListId] = useState<string | null>(null);
 
   return (
-    <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mb-5">
-        <h2 className="text-2xl font-black">Listas de outros usuarios</h2>
-        <p className="text-supermarket-ink/60">Visualize listas cadastradas por outras pessoas neste navegador.</p>
-      </div>
-      <div className="space-y-3">
-        {otherLists.length === 0 ? (
-          <EmptyState />
-        ) : (
-          otherLists.map((list) => {
-            const count = products.filter((product) => product.listId === list.id).length;
-            return (
-              <article className="shared-list-row" key={list.id}>
-                <span className="list-color-dot" style={{ backgroundColor: list.color }} />
-                <div className="min-w-0 flex-1">
-                  <strong>{list.name}</strong>
-                  <small>
-                    {userName(list.userId)} - {count} produtos
-                  </small>
-                </div>
-              </article>
-            );
-          })
-        )}
-      </div>
-    </section>
+    <ShoppingList
+      lists={props.lists}
+      products={props.products}
+      users={props.users}
+      currentUserId={props.currentUserId}
+      selectedListId={selectedSharedListId}
+      editingListId={props.editingListId}
+      title="Outras listas"
+      description="Visualize listas de todos os usuarios cadastrados neste navegador."
+      allowCreateList={false}
+      onSelectList={setSelectedSharedListId}
+      onBackToLists={() => setSelectedSharedListId(null)}
+      onStartList={() => undefined}
+      onEditList={props.onEditList}
+      onCancelList={props.onCancelList}
+      onSaveList={props.onSaveList}
+      onDeleteList={props.onDeleteList}
+      onSaveProduct={props.onSaveProduct}
+      onToggleBought={props.onToggleBought}
+      onInlineChange={props.onInlineChange}
+      onClearFields={props.onClearFields}
+      onDeleteProduct={props.onDeleteProduct}
+    />
   );
 }
 
