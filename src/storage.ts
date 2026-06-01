@@ -65,7 +65,8 @@ export function sortByNewest<T extends Product | PriceHistory>(items: T[]) {
 }
 
 function normalizeDatabase(database: AppDatabase): AppDatabase {
-  const lists = [...database.lists];
+  const fallbackUserId = database.activeUserId ?? database.users[0]?.uid ?? "legacy-user";
+  const lists = database.lists.map((list) => ({ ...list, userId: list.userId || fallbackUserId }));
   const products = database.products.map((product) => ({ ...product }));
 
   for (const user of database.users) {
