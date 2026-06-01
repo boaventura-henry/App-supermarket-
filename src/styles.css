@@ -127,6 +127,23 @@
     @apply rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white/60;
   }
 
+  .auth-passkey-enrollment {
+    @apply rounded-[1.4rem] border p-4;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(120, 237, 189, 0.2);
+  }
+
+  .auth-passkey-enrollment p {
+    @apply mt-2 text-sm font-semibold leading-6 text-white/70;
+  }
+
+  .auth-passkey-enrollment-icon {
+    @apply flex h-14 w-14 items-center justify-center rounded-2xl;
+    background: rgba(120, 237, 189, 0.12);
+    color: #9afbd0;
+    box-shadow: inset 0 0 0 1px rgba(120, 237, 189, 0.18);
+  }
+
   .auth-links {
     @apply mt-5 flex items-center justify-between gap-4 px-3;
   }

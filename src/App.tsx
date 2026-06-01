@@ -36,7 +36,7 @@ import {
   saveDatabase,
   sortByNewest
 } from "./storage";
-import type { AppDatabase, PasskeyCredential, PriceHistory, Product, ShoppingList, User, View } from "./types";
+import type { AppDatabase, PriceHistory, Product, ShoppingList, User, View } from "./types";
 import {
   createPasskeyForUser,
   describePasskeyError,
@@ -146,6 +146,7 @@ export function App() {
   const [passkeyError, setPasskeyError] = useState("");
   const [passkeySupported, setPasskeySupported] = useState(false);
   const [isPasskeyBusy, setIsPasskeyBusy] = useState(false);
+  const [pendingPasskeyUserId, setPendingPasskeyUserId] = useState<string | null>(null);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
@@ -179,6 +180,11 @@ export function App() {
     [database.activeUserId, database.users]
   );
 
+  const pendingPasskeyUser = useMemo(
+    () => database.users.find((user) => user.uid === pendingPasskeyUserId) ?? null,
+    [database.users, pendingPasskeyUserId]
+  );
+
   const userData = useMemo(() => {
     if (!currentUser) {
       return { lists: [], products: [], priceHistory: [] };
@@ -186,12 +192,10 @@ export function App() {
     return getUserData(database, currentUser.uid);
   }, [currentUser, database]);
 
-  const currentUserPasskey = useMemo(() => {
-    if (!currentUser) {
-      return null;
-    }
-    return database.passkeys.find((passkey) => passkey.userId === currentUser.uid) ?? null;
-  }, [currentUser, database.passkeys]);
+  const pendingUserHasPasskey = useMemo(() => {
+    const userId = pendingPasskeyUser?.uid;
+    return Boolean(userId && database.passkeys.some((passkey) => passkey.userId === userId));
+  }, [database.passkeys, pendingPasskeyUser]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -209,9 +213,24 @@ export function App() {
     setDatabase((current) => updater(current));
   }
 
+  function userNeedsPasskeyOffer(user: User) {
+    return passkeySupported && !database.passkeys.some((passkey) => passkey.userId === user.uid);
+  }
+
+  function finishAuthenticatedLogin(user: User) {
+    updateDatabase((current) => ({ ...current, activeUserId: user.uid }));
+    setPendingPasskeyUserId(null);
+    setPasskeyMessage("");
+    setPasskeyError("");
+    setAuthMessage("");
+    setView("home");
+  }
+
   async function handleLogin(email: string, password: string) {
     setAuthError("");
     setAuthMessage("");
+    setPasskeyError("");
+    setPasskeyMessage("");
     const normalizedEmail = normalizeEmail(email);
     const passwordHash = await hashText(password);
     const user = database.users.find((item) => item.email === normalizedEmail);
@@ -219,13 +238,20 @@ export function App() {
       setAuthError("E-mail ou senha invalidos.");
       return;
     }
-    updateDatabase((current) => ({ ...current, activeUserId: user.uid }));
-    setView("home");
+    if (userNeedsPasskeyOffer(user)) {
+      setPendingPasskeyUserId(user.uid);
+      setAuthMode("login");
+      setAuthMessage("Login confirmado. Voce pode ativar biometria agora ou continuar sem ativar.");
+      return;
+    }
+    finishAuthenticatedLogin(user);
   }
 
   async function handleRegister(name: string, email: string, password: string, securityAnswer: string) {
     setAuthError("");
     setAuthMessage("");
+    setPasskeyError("");
+    setPasskeyMessage("");
     const normalizedEmail = normalizeEmail(email);
     if (!name.trim() || !normalizedEmail || password.length < 6 || !securityAnswer.trim()) {
       setAuthError("Preencha nome, e-mail, senha com 6+ caracteres e resposta de seguranca.");
@@ -245,8 +271,14 @@ export function App() {
       createdAt: Date.now()
     };
 
-    updateDatabase((current) => ({ ...current, users: [...current.users, user], activeUserId: user.uid }));
-    setView("home");
+    updateDatabase((current) => ({ ...current, users: [...current.users, user] }));
+    if (userNeedsPasskeyOffer(user)) {
+      setPendingPasskeyUserId(user.uid);
+      setAuthMode("login");
+      setAuthMessage("Conta criada. Voce pode ativar biometria agora ou continuar sem ativar.");
+      return;
+    }
+    finishAuthenticatedLogin(user);
   }
 
   async function handleRecover(email: string, securityAnswer: string, newPassword: string) {
@@ -302,20 +334,17 @@ export function App() {
     }
   }
 
-  async function handleRegisterPasskey() {
-    if (!currentUser) {
-      return;
-    }
+  async function handleRegisterPasskey(user: User) {
     setPasskeyError("");
     setPasskeyMessage("");
     setIsPasskeyBusy(true);
     try {
-      const passkey = await createPasskeyForUser(currentUser);
+      const passkey = await createPasskeyForUser(user);
       updateDatabase((current) => ({
         ...current,
-        passkeys: [...current.passkeys.filter((item) => item.userId !== currentUser.uid), passkey]
+        passkeys: [...current.passkeys.filter((item) => item.userId !== user.uid), passkey]
       }));
-      setPasskeyMessage("Biometria ativada neste dispositivo.");
+      setPasskeyMessage("Biometria ativada neste dispositivo. Use a biometria ou PIN do seu dispositivo nos proximos acessos.");
     } catch (err) {
       setPasskeyError(describePasskeyError(err));
     } finally {
@@ -326,6 +355,7 @@ export function App() {
   function logout() {
     updateDatabase((current) => ({ ...current, activeUserId: null }));
     setView("home");
+    setPendingPasskeyUserId(null);
     setSelectedListId(null);
     setEditingListId(null);
     setPasskeyMessage("");
@@ -557,8 +587,18 @@ export function App() {
         onRegister={handleRegister}
         onRecover={handleRecover}
         onPasskeyLogin={handlePasskeyLogin}
+        onRegisterPasskey={handleRegisterPasskey}
+        onContinueAfterPasskey={() => {
+          if (pendingPasskeyUser) {
+            finishAuthenticatedLogin(pendingPasskeyUser);
+          }
+        }}
         passkeySupported={passkeySupported}
         hasPasskeys={database.passkeys.length > 0}
+        pendingPasskeyUser={pendingPasskeyUser}
+        pendingUserHasPasskey={pendingUserHasPasskey}
+        passkeyMessage={passkeyMessage}
+        passkeyError={passkeyError}
         isPasskeyBusy={isPasskeyBusy}
       />
     );
@@ -602,15 +642,6 @@ export function App() {
         userName={currentUser.name}
       />
 
-      <PasskeyEnrollmentBanner
-        currentUserPasskey={currentUserPasskey}
-        supported={passkeySupported}
-        busy={isPasskeyBusy}
-        message={passkeyMessage}
-        error={passkeyError}
-        onRegister={handleRegisterPasskey}
-      />
-
       {view === "home" ? <Home products={userData.products} /> : null}
 
       {view === "list" ? (
@@ -652,8 +683,14 @@ function AuthScreen({
   onRegister,
   onRecover,
   onPasskeyLogin,
+  onRegisterPasskey,
+  onContinueAfterPasskey,
   passkeySupported,
   hasPasskeys,
+  pendingPasskeyUser,
+  pendingUserHasPasskey,
+  passkeyMessage,
+  passkeyError,
   isPasskeyBusy
 }: {
   mode: AuthMode;
@@ -664,8 +701,14 @@ function AuthScreen({
   onRegister: (name: string, email: string, password: string, securityAnswer: string) => Promise<void>;
   onRecover: (email: string, securityAnswer: string, newPassword: string) => Promise<void>;
   onPasskeyLogin: () => Promise<void>;
+  onRegisterPasskey: (user: User) => Promise<void>;
+  onContinueAfterPasskey: () => void;
   passkeySupported: boolean;
   hasPasskeys: boolean;
+  pendingPasskeyUser: User | null;
+  pendingUserHasPasskey: boolean;
+  passkeyMessage: string;
+  passkeyError: string;
   isPasskeyBusy: boolean;
 }) {
   const [name, setName] = useState("");
@@ -696,6 +739,13 @@ function AuthScreen({
   const heading =
     mode === "login" ? "Entrar no aplicativo" : mode === "register" ? "Criar sua conta" : "Recuperar senha";
   const buttonLabel = mode === "login" ? "Acessar o App" : mode === "register" ? "Criar conta" : "Salvar nova senha";
+  const showPasskeyActivation = mode === "login" && Boolean(pendingPasskeyUser);
+
+  function registerPendingPasskey() {
+    if (pendingPasskeyUser) {
+      void onRegisterPasskey(pendingPasskeyUser);
+    }
+  }
 
   return (
     <main className="auth-screen">
@@ -708,6 +758,43 @@ function AuthScreen({
           <p>Suas compras sob controle</p>
         </div>
 
+        {showPasskeyActivation && pendingPasskeyUser ? (
+          <section className="auth-form auth-passkey-enrollment" aria-live="polite">
+            <div className="auth-passkey-enrollment-icon" aria-hidden="true">
+              <ShieldCheck size={28} />
+            </div>
+            <div>
+              <h2>Ativar biometria?</h2>
+              <p>
+                Use a biometria ou PIN do seu dispositivo para entrar mais rapido. O SuperList nao le nem armazena sua
+                biometria; salvamos apenas os metadados publicos da passkey.
+              </p>
+            </div>
+            {message ? <p className="auth-alert auth-alert-success">{message}</p> : null}
+            {passkeyMessage ? <p className="auth-alert auth-alert-success">{passkeyMessage}</p> : null}
+            {passkeyError ? <p className="auth-alert auth-alert-error">{passkeyError}</p> : null}
+            {passkeySupported && !pendingUserHasPasskey ? (
+              <button
+                className="auth-passkey-button"
+                type="button"
+                onClick={registerPendingPasskey}
+                disabled={isPasskeyBusy}
+              >
+                <Fingerprint size={21} />
+                {isPasskeyBusy ? "Aguardando biometria..." : "Ativar biometria do dispositivo"}
+              </button>
+            ) : null}
+            {!passkeySupported ? (
+              <p className="auth-passkey-hint">
+                Este navegador ou dispositivo nao informou suporte a WebAuthn/Passkeys. Voce pode continuar usando e-mail
+                e senha.
+              </p>
+            ) : null}
+            <button className="auth-submit" type="button" onClick={onContinueAfterPasskey}>
+              {pendingUserHasPasskey ? "Continuar para o app" : "Continuar sem biometria"}
+            </button>
+          </section>
+        ) : (
         <form className="auth-form" onSubmit={submit}>
           <h2>{heading}</h2>
 
@@ -822,60 +909,9 @@ function AuthScreen({
             </button>
           ) : null}
         </form>
+        )}
       </section>
     </main>
-  );
-}
-
-function PasskeyEnrollmentBanner({
-  currentUserPasskey,
-  supported,
-  busy,
-  message,
-  error,
-  onRegister
-}: {
-  currentUserPasskey: PasskeyCredential | null;
-  supported: boolean;
-  busy: boolean;
-  message: string;
-  error: string;
-  onRegister: () => Promise<void>;
-}) {
-  if (!supported && !message && !error) {
-    return null;
-  }
-
-  if (currentUserPasskey && !message && !error) {
-    return null;
-  }
-
-  return (
-    <section className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 lg:px-8">
-      <div className="passkey-banner">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="passkey-icon" aria-hidden="true">
-            <ShieldCheck size={22} />
-          </div>
-          <div className="min-w-0">
-            <h2>Login com biometria</h2>
-            <p>
-              {supported
-                ? "Ative uma passkey para entrar com Face ID, digital, Touch ID ou Windows Hello neste dispositivo."
-                : "Este navegador nao informou suporte a biometria/passkeys. O login por senha continua disponivel."}
-            </p>
-            {message ? <p className="passkey-message">{message}</p> : null}
-            {error ? <p className="passkey-error">{error}</p> : null}
-          </div>
-        </div>
-        {supported && !currentUserPasskey ? (
-          <button className="button-primary justify-center" type="button" onClick={onRegister} disabled={busy}>
-            <Fingerprint size={18} />
-            {busy ? "Aguardando..." : "Ativar biometria"}
-          </button>
-        ) : null}
-      </div>
-    </section>
   );
 }
 

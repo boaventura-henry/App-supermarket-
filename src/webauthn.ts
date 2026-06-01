@@ -14,6 +14,7 @@ function base64UrlToBytes(value: string) {
 }
 
 function randomChallenge() {
+  // Frontend-only app: the challenge is generated locally because there is no server to verify it.
   const challenge = new Uint8Array(32);
   crypto.getRandomValues(challenge);
   return challenge;
