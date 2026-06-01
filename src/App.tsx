@@ -15,6 +15,7 @@ import {
   Menu,
   Moon,
   Plus,
+  RefreshCcw,
   Save,
   Search,
   ShieldCheck,
@@ -48,9 +49,17 @@ type ThemeMode = "light" | "dark";
 
 type ProductForm = {
   name: string;
+  brand: string;
   quantity: string;
   unitPrice: string;
   supermarket: string;
+};
+
+type ClearProductFields = {
+  brand: boolean;
+  quantity: boolean;
+  unitPrice: boolean;
+  supermarket: boolean;
 };
 
 type ListForm = {
@@ -83,9 +92,17 @@ const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
 
 const emptyProductForm: ProductForm = {
   name: "",
+  brand: "",
   quantity: "",
   unitPrice: "",
   supermarket: ""
+};
+
+const emptyClearProductFields: ClearProductFields = {
+  brand: false,
+  quantity: false,
+  unitPrice: false,
+  supermarket: false
 };
 
 const emptyListForm: ListForm = {
@@ -121,7 +138,7 @@ function loadTheme(): ThemeMode {
 
 export function App() {
   const [database, setDatabase] = useState<AppDatabase>(() => loadDatabase());
-  const [view, setView] = useState<View>("list");
+  const [view, setView] = useState<View>("home");
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
@@ -203,7 +220,7 @@ export function App() {
       return;
     }
     updateDatabase((current) => ({ ...current, activeUserId: user.uid }));
-    setView("list");
+    setView("home");
   }
 
   async function handleRegister(name: string, email: string, password: string, securityAnswer: string) {
@@ -229,7 +246,7 @@ export function App() {
     };
 
     updateDatabase((current) => ({ ...current, users: [...current.users, user], activeUserId: user.uid }));
-    setView("list");
+    setView("home");
   }
 
   async function handleRecover(email: string, securityAnswer: string, newPassword: string) {
@@ -277,7 +294,7 @@ export function App() {
           item.id === passkey.id ? { ...item, lastUsedAt: Date.now() } : item
         )
       }));
-      setView("list");
+      setView("home");
     } catch (err) {
       setAuthError(describePasskeyError(err));
     } finally {
@@ -308,7 +325,7 @@ export function App() {
 
   function logout() {
     updateDatabase((current) => ({ ...current, activeUserId: null }));
-    setView("list");
+    setView("home");
     setSelectedListId(null);
     setEditingListId(null);
     setPasskeyMessage("");
@@ -385,6 +402,7 @@ export function App() {
     if (unitPrice === undefined) {
       throw new Error("Informe um valor unitario valido ou deixe em branco.");
     }
+    const brand = form.brand.trim();
     const supermarket = form.supermarket.trim();
     const timestamp = Date.now();
     updateDatabase((current) => {
@@ -393,7 +411,7 @@ export function App() {
         userId: currentUser.uid,
         listId,
         name,
-        brand: "",
+        brand,
         quantity,
         unitPrice,
         supermarket,
@@ -409,7 +427,7 @@ export function App() {
                 userId: currentUser.uid,
                 listId,
                 productName: name,
-                brand: "",
+                brand,
                 price: unitPrice,
                 supermarket,
                 timestamp
@@ -449,13 +467,16 @@ export function App() {
     }));
   }
 
-  function updateProductInline(productId: string, field: "quantity" | "unitPrice", value: string) {
+  function updateProductInline(productId: string, field: "brand" | "quantity" | "unitPrice" | "supermarket", value: string) {
     if (!currentUser) {
       return;
     }
 
-    const parsed = field === "quantity" ? parseOptionalNumber(value) : parseMoney(value);
-    const nextValue = value.trim() === "" || parsed === null || parsed === undefined ? null : parsed;
+    const parsed = field === "quantity" ? parseOptionalNumber(value) : field === "unitPrice" ? parseMoney(value) : value.trim();
+    if (parsed === undefined) {
+      return;
+    }
+    const nextValue = field === "brand" || field === "supermarket" ? parsed : value.trim() === "" || parsed === null ? null : parsed;
     const timestamp = Date.now();
 
     updateDatabase((current) => {
@@ -465,8 +486,9 @@ export function App() {
       }
 
       const updated = { ...target, [field]: nextValue };
+      const historyPrice = field === "unitPrice" && typeof nextValue === "number" && nextValue > 0 ? nextValue : null;
       const history =
-        field === "unitPrice" && nextValue !== null && nextValue > 0
+        historyPrice !== null
           ? [
               ...current.priceHistory,
               {
@@ -475,7 +497,7 @@ export function App() {
                 listId: target.listId,
                 productName: target.name,
                 brand: target.brand,
-                price: nextValue,
+                price: historyPrice,
                 supermarket: target.supermarket,
                 timestamp
               }
@@ -489,6 +511,35 @@ export function App() {
         lists: current.lists.map((list) => (list.id === target.listId ? { ...list, updatedAt: timestamp } : list))
       };
     });
+  }
+
+  function clearProductFields(listId: string, fields: ClearProductFields) {
+    if (!currentUser) {
+      return;
+    }
+
+    const shouldClear = Object.values(fields).some(Boolean);
+    if (!shouldClear) {
+      throw new Error("Selecione pelo menos um campo para limpar.");
+    }
+
+    const timestamp = Date.now();
+    updateDatabase((current) => ({
+      ...current,
+      products: current.products.map((product) => {
+        if (product.userId !== currentUser.uid || product.listId !== listId) {
+          return product;
+        }
+        return {
+          ...product,
+          brand: fields.brand ? "" : product.brand,
+          quantity: fields.quantity ? null : product.quantity,
+          unitPrice: fields.unitPrice ? null : product.unitPrice,
+          supermarket: fields.supermarket ? "" : product.supermarket
+        };
+      }),
+      lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
+    }));
   }
 
   if (!currentUser) {
@@ -560,10 +611,13 @@ export function App() {
         onRegister={handleRegisterPasskey}
       />
 
+      {view === "home" ? <Home products={userData.products} /> : null}
+
       {view === "list" ? (
         <ShoppingList
           lists={userData.lists}
           products={userData.products}
+          userName={currentUser.name}
           selectedListId={selectedListId}
           editingListId={editingListId}
           onSelectList={setSelectedListId}
@@ -575,6 +629,7 @@ export function App() {
           onSaveProduct={saveProduct}
           onToggleBought={toggleBought}
           onInlineChange={updateProductInline}
+          onClearFields={clearProductFields}
           onDeleteProduct={deleteProduct}
         />
       ) : null}
@@ -824,9 +879,65 @@ function PasskeyEnrollmentBanner({
   );
 }
 
+function Home({ products }: { products: Product[] }) {
+  const boughtByMarket = useMemo(() => {
+    const grouped = products
+      .filter((product) => product.isBought)
+      .reduce<Record<string, number>>((acc, product) => {
+        const market = (product.supermarket ?? "").trim() || "Sem supermercado";
+        acc[market] = (acc[market] ?? 0) + 1;
+        return acc;
+      }, {});
+
+    return Object.entries(grouped)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, "pt-BR"));
+  }, [products]);
+
+  const totalBought = boughtByMarket.reduce((sum, item) => sum + item.value, 0);
+  const max = Math.max(...boughtByMarket.map((item) => item.value), 1);
+
+  return (
+    <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mb-5">
+        <p className="text-sm font-black uppercase text-supermarket-leaf">Home</p>
+        <h2 className="text-2xl font-black">Resumo das compras</h2>
+        <p className="text-supermarket-ink/60">Itens marcados como comprados, agrupados por supermercado.</p>
+      </div>
+      <div className="grid gap-5 lg:grid-cols-[0.35fr_0.65fr]">
+        <MetricCard label="Itens comprados" value={totalBought.toString()} />
+        <section className="panel">
+          <div className="mb-4 flex items-center gap-2">
+            <BarChart3 className="text-supermarket-leaf" size={22} />
+            <h3 className="text-xl font-black">Comprados por supermercado</h3>
+          </div>
+          {boughtByMarket.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <div className="home-bar-list">
+              {boughtByMarket.map((item) => (
+                <div className="home-bar-row" key={item.label}>
+                  <div className="flex min-w-0 items-center justify-between gap-3">
+                    <strong className="truncate">{item.label}</strong>
+                    <span>{item.value}</span>
+                  </div>
+                  <div className="home-bar-track">
+                    <div className="home-bar-fill" style={{ width: `${(item.value / max) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function ShoppingList({
   lists,
   products,
+  userName,
   selectedListId,
   editingListId,
   onSelectList,
@@ -838,10 +949,12 @@ function ShoppingList({
   onSaveProduct,
   onToggleBought,
   onInlineChange,
+  onClearFields,
   onDeleteProduct
 }: {
   lists: ShoppingList[];
   products: Product[];
+  userName: string;
   selectedListId: string | null;
   editingListId: string | null;
   onSelectList: (listId: string) => void;
@@ -852,10 +965,13 @@ function ShoppingList({
   onDeleteList: (listId: string) => void;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
-  onInlineChange: (productId: string, field: "quantity" | "unitPrice", value: string) => void;
+  onInlineChange: (productId: string, field: "brand" | "quantity" | "unitPrice" | "supermarket", value: string) => void;
+  onClearFields: (listId: string, fields: ClearProductFields) => void;
   onDeleteProduct: (productId: string) => void;
 }) {
   const [sort, setSort] = useState<ProductSort>({ field: "name", direction: "asc" });
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const selectedList = lists.find((list) => list.id === selectedListId) ?? lists[0] ?? null;
   const listProducts = useMemo(() => {
     if (!selectedList) {
@@ -880,7 +996,17 @@ function ShoppingList({
   }
 
   const total = listProducts.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
-  const boughtCount = listProducts.filter((product) => product.isBought).length;
+  const boughtProducts = listProducts.filter((product) => product.isBought);
+  const boughtCount = boughtProducts.length;
+  const boughtTotal = boughtProducts.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
+
+  function saveProductFromModal(form: ProductForm) {
+    if (!selectedList) {
+      return;
+    }
+    onSaveProduct(selectedList.id, form);
+    setIsProductModalOpen(false);
+  }
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -919,7 +1045,7 @@ function ShoppingList({
               >
                 <span className="list-color-dot" style={{ backgroundColor: list.color }} />
                 <strong>{list.name}</strong>
-                <small>{count} produtos</small>
+                <small>{userName} - {count} produtos</small>
               </button>
             );
           })
@@ -943,14 +1069,20 @@ function ShoppingList({
                 <Edit3 size={16} />
                 Lista
               </button>
+              <button className="button-secondary" type="button" onClick={() => setIsClearModalOpen(true)}>
+                <RefreshCcw size={16} />
+                Limpar campos
+              </button>
+              <button className="button-primary" type="button" onClick={() => setIsProductModalOpen(true)}>
+                <Plus size={16} />
+                Produto
+              </button>
               <button className="danger-button" type="button" onClick={() => onDeleteList(selectedList.id)}>
                 <Trash2 size={16} />
                 Lista
               </button>
             </div>
           </div>
-
-          <ProductQuickForm onSave={(form) => onSaveProduct(selectedList.id, form)} />
 
           <div className="compact-product-list">
             <div className="compact-product-header">
@@ -959,6 +1091,7 @@ function ShoppingList({
                 Produto
                 <SortIndicator active={sort.field === "name"} direction={sort.direction} />
               </button>
+              <span>Marca</span>
               <button className="sort-header" type="button" onClick={() => toggleSort("quantity")}>
                 Qtd.
                 <SortIndicator active={sort.field === "quantity"} direction={sort.direction} />
@@ -983,6 +1116,13 @@ function ShoppingList({
                   <strong>{product.name}</strong>
                   <input
                     className="inline-input"
+                    value={product.brand ?? ""}
+                    placeholder="-"
+                    aria-label={`Marca de ${product.name}`}
+                    onChange={(event) => onInlineChange(product.id, "brand", event.target.value)}
+                  />
+                  <input
+                    className="inline-input"
                     inputMode="decimal"
                     value={product.quantity ?? ""}
                     placeholder="-"
@@ -999,7 +1139,13 @@ function ShoppingList({
                   />
                   <span className="inline-flex min-w-0 items-center gap-1 truncate text-sm font-semibold text-supermarket-ink/65">
                     <Store size={14} className="shrink-0 text-supermarket-leaf" />
-                    <span className="truncate">{product.supermarket || "-"}</span>
+                    <input
+                      className="inline-input"
+                      value={product.supermarket || ""}
+                      placeholder="-"
+                      aria-label={`Supermercado de ${product.name}`}
+                      onChange={(event) => onInlineChange(product.id, "supermarket", event.target.value)}
+                    />
                   </span>
                   <button className="icon-button" type="button" onClick={() => onDeleteProduct(product.id)} aria-label="Excluir produto">
                     <Trash2 size={16} />
@@ -1008,13 +1154,27 @@ function ShoppingList({
               ))
             )}
           </div>
+          <div className="product-grid-footer">
+            <span>Total comprado: <strong>{money(boughtTotal)}</strong></span>
+            <span>Itens comprados: <strong>{boughtCount}</strong></span>
+          </div>
         </div>
+      ) : null}
+      {isProductModalOpen ? <ProductModal onCancel={() => setIsProductModalOpen(false)} onSave={saveProductFromModal} /> : null}
+      {selectedList && isClearModalOpen ? (
+        <ClearFieldsModal
+          onCancel={() => setIsClearModalOpen(false)}
+          onConfirm={(fields) => {
+            onClearFields(selectedList.id, fields);
+            setIsClearModalOpen(false);
+          }}
+        />
       ) : null}
     </section>
   );
 }
 
-function ProductQuickForm({ onSave }: { onSave: (form: ProductForm) => void }) {
+function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (form: ProductForm) => void }) {
   const [form, setForm] = useState<ProductForm>(emptyProductForm);
   const [error, setError] = useState("");
 
@@ -1030,60 +1190,162 @@ function ProductQuickForm({ onSave }: { onSave: (form: ProductForm) => void }) {
   }
 
   return (
-    <form className="product-entry-panel" onSubmit={submit}>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-bold uppercase text-supermarket-leaf">Produto</p>
-          <h4 className="text-lg font-black">Cadastrar item</h4>
+    <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
+      <form className="product-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="passkey-icon" aria-hidden="true">
+              <ShoppingCart size={22} />
+            </div>
+            <div>
+              <p className="text-sm font-bold uppercase text-supermarket-leaf">Produto</p>
+              <h4 className="text-xl font-black">Cadastrar item</h4>
+            </div>
+          </div>
+          <button className="icon-button" type="button" onClick={onCancel} aria-label="Fechar cadastro de produto">
+            <X size={18} />
+          </button>
         </div>
-        <ShoppingCart className="text-supermarket-leaf" size={22} />
-      </div>
-      <div className="product-entry-grid">
-        <label className="field">
-          <span>Nome do produto *</span>
-          <input
-            className="input"
-            value={form.name}
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
-            placeholder="Ex.: Arroz, leite, cafe..."
-          />
-        </label>
-        <label className="field">
-          <span>Quantidade</span>
-          <input
-            className="input"
-            inputMode="decimal"
-            value={form.quantity}
-            onChange={(event) => setForm({ ...form, quantity: event.target.value })}
-            placeholder="Opcional"
-          />
-        </label>
-        <label className="field">
-          <span>Valor unitario</span>
-          <input
-            className="input"
-            inputMode="decimal"
-            value={form.unitPrice}
-            onChange={(event) => setForm({ ...form, unitPrice: event.target.value })}
-            placeholder="Opcional"
-          />
-        </label>
-        <label className="field">
-          <span>Supermercado</span>
-          <input
-            className="input"
-            value={form.supermarket}
-            onChange={(event) => setForm({ ...form, supermarket: event.target.value })}
-            placeholder="Opcional"
-          />
-        </label>
-      </div>
-      {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
-      <button className="button-primary mt-4 w-full justify-center sm:w-auto" type="submit">
-        <Plus size={18} />
-        Adicionar produto
-      </button>
-    </form>
+
+        <div className="grid gap-4">
+          <label className="field">
+            <span>Nome do produto *</span>
+            <input
+              className="input"
+              value={form.name}
+              onChange={(event) => setForm({ ...form, name: event.target.value })}
+              placeholder="Ex.: Arroz, leite, cafe..."
+              autoFocus
+            />
+          </label>
+          <label className="field">
+            <span>Marca</span>
+            <input
+              className="input"
+              value={form.brand}
+              onChange={(event) => setForm({ ...form, brand: event.target.value })}
+              placeholder="Opcional"
+            />
+          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="field">
+              <span>Quantidade</span>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={form.quantity}
+                onChange={(event) => setForm({ ...form, quantity: event.target.value })}
+                placeholder="Opcional"
+              />
+            </label>
+            <label className="field">
+              <span>Valor unitario</span>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={form.unitPrice}
+                onChange={(event) => setForm({ ...form, unitPrice: event.target.value })}
+                placeholder="Opcional"
+              />
+            </label>
+          </div>
+          <label className="field">
+            <span>Supermercado</span>
+            <input
+              className="input"
+              value={form.supermarket}
+              onChange={(event) => setForm({ ...form, supermarket: event.target.value })}
+              placeholder="Opcional"
+            />
+          </label>
+        </div>
+
+        {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button className="button-secondary justify-center" type="button" onClick={onCancel}>
+            Cancelar
+          </button>
+          <button className="button-primary justify-center" type="submit">
+            <Plus size={18} />
+            Adicionar produto
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ClearFieldsModal({
+  onCancel,
+  onConfirm
+}: {
+  onCancel: () => void;
+  onConfirm: (fields: ClearProductFields) => void;
+}) {
+  const [fields, setFields] = useState<ClearProductFields>(emptyClearProductFields);
+  const [error, setError] = useState("");
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      onConfirm(fields);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel limpar os campos.");
+    }
+  }
+
+  function updateField(field: keyof ClearProductFields) {
+    setFields((current) => ({ ...current, [field]: !current[field] }));
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
+      <form className="product-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold uppercase text-supermarket-leaf">Limpeza em massa</p>
+            <h4 className="text-xl font-black">Escolha os campos</h4>
+            <p className="mt-1 text-sm font-semibold text-supermarket-ink/60">
+              Os produtos, nomes e status de comprado serao preservados.
+            </p>
+          </div>
+          <button className="icon-button" type="button" onClick={onCancel} aria-label="Fechar limpeza de campos">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="bulk-clear-grid">
+          <label className="bulk-clear-option">
+            <input type="checkbox" checked={fields.quantity} onChange={() => updateField("quantity")} />
+            <span>Quantidade</span>
+          </label>
+          <label className="bulk-clear-option">
+            <input type="checkbox" checked={fields.unitPrice} onChange={() => updateField("unitPrice")} />
+            <span>Valor unitario</span>
+          </label>
+          <label className="bulk-clear-option">
+            <input type="checkbox" checked={fields.brand} onChange={() => updateField("brand")} />
+            <span>Marca</span>
+          </label>
+          <label className="bulk-clear-option">
+            <input type="checkbox" checked={fields.supermarket} onChange={() => updateField("supermarket")} />
+            <span>Supermercado</span>
+          </label>
+        </div>
+
+        {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button className="button-secondary justify-center" type="button" onClick={onCancel}>
+            Cancelar
+          </button>
+          <button className="danger-button justify-center" type="submit">
+            <RefreshCcw size={16} />
+            Confirmar limpeza
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -1499,6 +1761,9 @@ function SideMenu({
         </div>
 
         <nav className="side-menu-nav" aria-label="Navegacao principal">
+          <NavButton active={currentView === "home"} onClick={() => onNavigate("home")}>
+            Home
+          </NavButton>
           <NavButton active={currentView === "list"} onClick={() => onNavigate("list")}>
             Lista
           </NavButton>

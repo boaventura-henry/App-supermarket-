@@ -337,8 +337,8 @@
 
   .compact-product-header,
   .compact-product-row {
-    @apply grid min-w-[48rem] items-center gap-2 px-3;
-    grid-template-columns: 2.2rem minmax(12rem, 1fr) 5.2rem 6.3rem minmax(9rem, 0.8fr) 2.8rem;
+    @apply grid min-w-[64rem] items-center gap-2 px-3;
+    grid-template-columns: 2.2rem minmax(12rem, 1fr) minmax(8rem, 0.7fr) 5.6rem 6.6rem minmax(10rem, 0.8fr) 2.8rem;
   }
 
   .compact-product-header {
@@ -385,12 +385,48 @@
     @apply grid gap-3 md:grid-cols-[minmax(14rem,1.4fr)_minmax(7rem,0.6fr)_minmax(8rem,0.75fr)_minmax(10rem,1fr)];
   }
 
+  .product-grid-footer {
+    @apply mt-4 flex flex-col gap-2 rounded-2xl border border-supermarket-ink/10 bg-supermarket-mint/45 px-4 py-3 text-sm font-bold text-supermarket-ink/70 sm:flex-row sm:items-center sm:justify-end sm:gap-6;
+  }
+
+  .home-bar-list {
+    @apply grid gap-4;
+  }
+
+  .home-bar-row {
+    @apply grid gap-2 rounded-2xl border border-supermarket-ink/10 bg-supermarket-paper/60 p-3;
+  }
+
+  .home-bar-row span {
+    @apply rounded-full bg-supermarket-leaf/10 px-2 py-0.5 text-sm font-black text-supermarket-leaf;
+  }
+
+  .home-bar-track {
+    @apply h-3 overflow-hidden rounded-full bg-supermarket-ink/10;
+  }
+
+  .home-bar-fill {
+    @apply h-full rounded-full bg-supermarket-leaf transition-all duration-300;
+  }
+
+  .bulk-clear-grid {
+    @apply grid gap-3 sm:grid-cols-2;
+  }
+
+  .bulk-clear-option {
+    @apply flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl border border-supermarket-ink/10 bg-supermarket-paper/70 px-4 py-3 text-sm font-black text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
+  }
+
+  .bulk-clear-option input {
+    @apply h-5 w-5 accent-supermarket-leaf;
+  }
+
   .modal-backdrop {
     @apply fixed inset-0 z-50 grid place-items-center bg-black/50 px-4 py-6;
   }
 
   .product-modal {
-    @apply w-full max-w-lg rounded-[2rem] bg-white p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)];
+    @apply max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-[2rem] bg-white p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)];
   }
 
   .shared-list-row {
@@ -562,9 +598,22 @@
   .theme-dark .compact-product-row,
   .theme-dark .compact-product-list,
   .theme-dark .shared-list-row,
+  .theme-dark .home-bar-row,
+  .theme-dark .product-grid-footer,
+  .theme-dark .bulk-clear-option,
   .theme-dark .product-entry-panel,
   .theme-dark .passkey-banner {
     border-color: rgba(125, 255, 176, 0.16);
+  }
+
+  .theme-dark .home-bar-row,
+  .theme-dark .product-grid-footer,
+  .theme-dark .bulk-clear-option {
+    background: #020806;
+  }
+
+  .theme-dark .home-bar-track {
+    background: rgba(233, 255, 243, 0.12);
   }
 
   .theme-dark .empty-chart,

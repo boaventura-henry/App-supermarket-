@@ -83,6 +83,8 @@ function normalizeDatabase(database: AppDatabase): AppDatabase {
         }
         product.quantity = Number.isFinite(product.quantity) ? product.quantity : null;
         product.unitPrice = Number.isFinite(product.unitPrice) ? product.unitPrice : null;
+        product.brand = product.brand ?? "";
+        product.supermarket = product.supermarket ?? "";
       }
     }
   }
