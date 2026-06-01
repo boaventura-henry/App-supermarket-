@@ -349,17 +349,17 @@
   }
 
   .compact-product-list {
-    @apply overflow-x-auto rounded-2xl border border-supermarket-ink/10 bg-white;
+    @apply overflow-x-auto rounded-[1.4rem] border border-supermarket-ink/10 bg-white shadow-soft;
   }
 
   .compact-product-header,
   .compact-product-row {
-    @apply grid min-w-[64rem] items-center gap-2 px-3;
-    grid-template-columns: 2.2rem minmax(12rem, 1fr) minmax(8rem, 0.7fr) 5.6rem 6.6rem minmax(10rem, 0.8fr) 2.8rem;
+    @apply grid min-w-[72rem] items-center gap-2 px-3;
+    grid-template-columns: minmax(15rem, 1.4fr) minmax(8rem, 0.7fr) 7rem 5.6rem minmax(10rem, 0.8fr) 7rem 2.8rem;
   }
 
   .compact-product-header {
-    @apply sticky top-0 z-10 bg-supermarket-mint/80 py-2 text-xs font-black uppercase text-supermarket-ink/60 backdrop-blur;
+    @apply sticky top-0 z-10 border-b border-supermarket-ink/10 bg-supermarket-mint/80 py-3 text-xs font-black uppercase text-supermarket-ink/65 backdrop-blur;
   }
 
   .sort-header {
@@ -375,19 +375,40 @@
   }
 
   .compact-product-row {
-    @apply min-h-10 border-t border-supermarket-ink/10 py-1.5 text-sm;
+    @apply min-h-12 border-t border-supermarket-ink/10 py-2 text-sm transition hover:bg-supermarket-mint/30;
+  }
+
+  .product-name-cell {
+    @apply flex min-w-0 items-center gap-2;
+  }
+
+  .product-name-cell strong {
+    @apply min-w-0 truncate font-black;
+  }
+
+  .market-input-cell {
+    @apply inline-flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-supermarket-ink/65;
+  }
+
+  .line-total {
+    @apply rounded-xl bg-supermarket-mint/60 px-2 py-1 text-right text-sm font-black text-supermarket-ink/75;
   }
 
   .compact-product-row-done {
-    @apply opacity-60;
+    @apply opacity-70;
+    background: rgba(23, 44, 36, 0.03);
   }
 
-  .compact-product-row-done strong {
+  .compact-product-row-done .product-name-cell strong {
     @apply line-through;
   }
 
   .inline-input {
-    @apply h-8 w-full rounded-xl border border-supermarket-ink/10 bg-white px-2 text-sm font-bold text-supermarket-ink outline-none transition focus:border-supermarket-leaf focus:ring-2 focus:ring-supermarket-leaf/15;
+    @apply h-8 w-full rounded-xl border border-transparent bg-supermarket-paper/70 px-2 text-sm font-bold text-supermarket-ink outline-none transition hover:border-supermarket-ink/10 focus:border-supermarket-leaf focus:bg-white focus:ring-2 focus:ring-supermarket-leaf/15;
+  }
+
+  .inline-input-money {
+    @apply text-right;
   }
 
   .color-input {
@@ -546,6 +567,26 @@
 
   .theme-dark .input::placeholder {
     color: rgba(233, 255, 243, 0.48);
+  }
+
+  .theme-dark .inline-input::placeholder {
+    color: rgba(233, 255, 243, 0.42);
+  }
+
+  .theme-dark .field,
+  .theme-dark .product-modal .field,
+  .theme-dark .bulk-clear-option,
+  .theme-dark .market-input-cell {
+    color: rgba(233, 255, 243, 0.78);
+  }
+
+  .theme-dark .line-total {
+    background: rgba(109, 247, 167, 0.12);
+    color: #e9fff3;
+  }
+
+  .theme-dark .compact-product-row-done {
+    background: rgba(233, 255, 243, 0.04);
   }
 
   .theme-dark .button-secondary,

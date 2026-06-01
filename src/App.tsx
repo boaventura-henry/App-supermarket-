@@ -1035,6 +1035,7 @@ function ShoppingList({
   const boughtProducts = listProducts.filter((product) => product.isBought);
   const boughtCount = boughtProducts.length;
   const boughtTotal = boughtProducts.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
+  const completionRate = listProducts.length > 0 ? Math.round((boughtCount / listProducts.length) * 100) : 0;
 
   function saveProductFromModal(form: ProductForm) {
     if (!selectedList) {
@@ -1122,18 +1123,18 @@ function ShoppingList({
 
           <div className="compact-product-list">
             <div className="compact-product-header">
-              <span />
               <button className="sort-header" type="button" onClick={() => toggleSort("name")}>
                 Produto
                 <SortIndicator active={sort.field === "name"} direction={sort.direction} />
               </button>
               <span>Marca</span>
+              <span>Valor un.</span>
               <button className="sort-header" type="button" onClick={() => toggleSort("quantity")}>
                 Qtd.
                 <SortIndicator active={sort.field === "quantity"} direction={sort.direction} />
               </button>
-              <span>Valor un.</span>
               <span>Supermercado</span>
+              <span>Total</span>
               <span />
             </div>
             {listProducts.length === 0 ? (
@@ -1141,21 +1142,31 @@ function ShoppingList({
             ) : (
               listProducts.map((product) => (
                 <div className={product.isBought ? "compact-product-row compact-product-row-done" : "compact-product-row"} key={product.id}>
-                  <button
-                    className={product.isBought ? "status-bought" : "status-pending"}
-                    type="button"
-                    aria-label={product.isBought ? "Comprado" : "Nao comprado"}
-                    onClick={() => onToggleBought(product.id)}
-                  >
-                    {product.isBought ? <CheckCircle2 size={18} /> : <Circle size={18} />}
-                  </button>
-                  <strong>{product.name}</strong>
+                  <div className="product-name-cell">
+                    <button
+                      className={product.isBought ? "status-bought" : "status-pending"}
+                      type="button"
+                      aria-label={product.isBought ? "Comprado" : "Nao comprado"}
+                      onClick={() => onToggleBought(product.id)}
+                    >
+                      {product.isBought ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+                    </button>
+                    <strong title={product.name}>{product.name}</strong>
+                  </div>
                   <input
                     className="inline-input"
                     value={product.brand ?? ""}
                     placeholder="-"
                     aria-label={`Marca de ${product.name}`}
                     onChange={(event) => onInlineChange(product.id, "brand", event.target.value)}
+                  />
+                  <input
+                    className="inline-input inline-input-money"
+                    inputMode="decimal"
+                    value={product.unitPrice !== null ? product.unitPrice.toFixed(2).replace(".", ",") : ""}
+                    placeholder="-"
+                    aria-label={`Valor unitario de ${product.name}`}
+                    onChange={(event) => onInlineChange(product.id, "unitPrice", event.target.value)}
                   />
                   <input
                     className="inline-input"
@@ -1165,15 +1176,7 @@ function ShoppingList({
                     aria-label={`Quantidade de ${product.name}`}
                     onChange={(event) => onInlineChange(product.id, "quantity", event.target.value)}
                   />
-                  <input
-                    className="inline-input"
-                    inputMode="decimal"
-                    value={product.unitPrice !== null ? product.unitPrice.toFixed(2).replace(".", ",") : ""}
-                    placeholder="-"
-                    aria-label={`Valor unitario de ${product.name}`}
-                    onChange={(event) => onInlineChange(product.id, "unitPrice", event.target.value)}
-                  />
-                  <span className="inline-flex min-w-0 items-center gap-1 truncate text-sm font-semibold text-supermarket-ink/65">
+                  <span className="market-input-cell">
                     <Store size={14} className="shrink-0 text-supermarket-leaf" />
                     <input
                       className="inline-input"
@@ -1183,6 +1186,7 @@ function ShoppingList({
                       onChange={(event) => onInlineChange(product.id, "supermarket", event.target.value)}
                     />
                   </span>
+                  <span className="line-total">{money((product.quantity ?? 0) * (product.unitPrice ?? 0))}</span>
                   <button className="icon-button" type="button" onClick={() => onDeleteProduct(product.id)} aria-label="Excluir produto">
                     <Trash2 size={16} />
                   </button>
@@ -1193,6 +1197,7 @@ function ShoppingList({
           <div className="product-grid-footer">
             <span>Total comprado: <strong>{money(boughtTotal)}</strong></span>
             <span>Itens comprados: <strong>{boughtCount}</strong></span>
+            <span>Conclusao: <strong>{completionRate}%</strong></span>
           </div>
         </div>
       ) : null}
