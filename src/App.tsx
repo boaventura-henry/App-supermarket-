@@ -55,6 +55,8 @@ type ProductForm = {
   supermarket: string;
 };
 
+type ProductEditDraft = Omit<ProductForm, "name">;
+
 type ClearProductFields = {
   brand: boolean;
   quantity: boolean;
@@ -132,6 +134,15 @@ function parseOptionalNumber(value: string) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
+function productToEditDraft(product: Product): ProductEditDraft {
+  return {
+    brand: product.brand ?? "",
+    quantity: product.quantity !== null ? String(product.quantity).replace(".", ",") : "",
+    unitPrice: product.unitPrice !== null ? product.unitPrice.toFixed(2).replace(".", ",") : "",
+    supermarket: product.supermarket || ""
+  };
+}
+
 function loadTheme(): ThemeMode {
   return localStorage.getItem("app-supermarket-theme") === "dark" ? "dark" : "light";
 }
@@ -201,11 +212,8 @@ export function App() {
     if (!currentUser) {
       return;
     }
-    if (!selectedListId && userData.lists.length > 0) {
-      setSelectedListId(userData.lists[0].id);
-    }
     if (selectedListId && !userData.lists.some((list) => list.id === selectedListId)) {
-      setSelectedListId(userData.lists[0]?.id ?? null);
+      setSelectedListId(null);
     }
   }, [currentUser, selectedListId, userData.lists]);
 
@@ -365,6 +373,9 @@ export function App() {
 
   function navigateTo(nextView: View) {
     setView(nextView);
+    if (nextView === "list") {
+      setSelectedListId(null);
+    }
     setIsMenuOpen(false);
   }
 
@@ -652,6 +663,7 @@ export function App() {
           selectedListId={selectedListId}
           editingListId={editingListId}
           onSelectList={setSelectedListId}
+          onBackToLists={() => setSelectedListId(null)}
           onStartList={() => setEditingListId("new")}
           onEditList={setEditingListId}
           onCancelList={() => setEditingListId(null)}
@@ -977,6 +989,7 @@ function ShoppingList({
   selectedListId,
   editingListId,
   onSelectList,
+  onBackToLists,
   onStartList,
   onEditList,
   onCancelList,
@@ -994,6 +1007,7 @@ function ShoppingList({
   selectedListId: string | null;
   editingListId: string | null;
   onSelectList: (listId: string) => void;
+  onBackToLists: () => void;
   onStartList: () => void;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
@@ -1008,7 +1022,7 @@ function ShoppingList({
   const [sort, setSort] = useState<ProductSort>({ field: "name", direction: "asc" });
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-  const selectedList = lists.find((list) => list.id === selectedListId) ?? lists[0] ?? null;
+  const selectedList = selectedListId ? lists.find((list) => list.id === selectedListId) ?? null : null;
   const listProducts = useMemo(() => {
     if (!selectedList) {
       return [];
@@ -1045,17 +1059,89 @@ function ShoppingList({
     setIsProductModalOpen(false);
   }
 
+  if (!selectedList) {
+    return (
+      <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-2xl font-black">Listas cadastradas</h2>
+            <p className="text-supermarket-ink/60">Escolha uma lista para abrir os itens ou crie uma nova.</p>
+          </div>
+          <button className="button-primary justify-center" type="button" onClick={onStartList}>
+            <Plus size={18} />
+            Nova lista
+          </button>
+        </div>
+
+        {editingListId ? (
+          <ListEditor
+            list={editingListId === "new" ? null : lists.find((list) => list.id === editingListId) ?? null}
+            onCancel={onCancelList}
+            onSave={onSaveList}
+          />
+        ) : null}
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {lists.length === 0 ? (
+            <EmptyState action="Criar primeira lista" onClick={onStartList} />
+          ) : (
+            lists.map((list) => {
+              const count = products.filter((product) => product.listId === list.id).length;
+              return (
+                <button
+                  className="shopping-list-card"
+                  key={list.id}
+                  type="button"
+                  onClick={() => onSelectList(list.id)}
+                >
+                  <span className="list-color-dot" style={{ backgroundColor: list.color }} />
+                  <strong>{list.name}</strong>
+                  <small>
+                    {userName} - {count} {count === 1 ? "item" : "itens"}
+                  </small>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-black">Listas de compras</h2>
-          <p className="text-supermarket-ink/60">Crie listas por compra, mercado ou ocasiao.</p>
+        <div className="flex items-center gap-3">
+          <span className="list-color-dot" style={{ backgroundColor: selectedList.color }} />
+          <div>
+            <p className="text-sm font-black uppercase text-supermarket-leaf">Lista</p>
+            <h2 className="text-2xl font-black">{selectedList.name}</h2>
+            <p className="text-sm text-supermarket-ink/60">
+              {listProducts.length} itens - {boughtCount} comprados - {money(total)}
+            </p>
+          </div>
         </div>
-        <button className="button-primary justify-center" type="button" onClick={onStartList}>
-          <Plus size={18} />
-          Nova lista
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className="button-secondary" type="button" onClick={onBackToLists}>
+            Listas
+          </button>
+          <button className="button-secondary" type="button" onClick={() => onEditList(selectedList.id)}>
+            <Edit3 size={16} />
+            Editar lista
+          </button>
+          <button className="button-secondary" type="button" onClick={() => setIsClearModalOpen(true)}>
+            <RefreshCcw size={16} />
+            Limpar campos
+          </button>
+          <button className="button-primary" type="button" onClick={() => setIsProductModalOpen(true)}>
+            <Plus size={16} />
+            Produto
+          </button>
+          <button className="danger-button" type="button" onClick={() => onDeleteList(selectedList.id)}>
+            <Trash2 size={16} />
+            Excluir lista
+          </button>
+        </div>
       </div>
 
       {editingListId ? (
@@ -1066,143 +1152,59 @@ function ShoppingList({
         />
       ) : null}
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {lists.length === 0 ? (
-          <EmptyState action="Criar primeira lista" onClick={onStartList} />
-        ) : (
-          lists.map((list) => {
-            const count = products.filter((product) => product.listId === list.id).length;
-            return (
-              <button
-                className={selectedList?.id === list.id ? "shopping-list-card shopping-list-card-active" : "shopping-list-card"}
-                key={list.id}
-                type="button"
-                onClick={() => onSelectList(list.id)}
-                style={{ borderColor: selectedList?.id === list.id ? list.color : undefined }}
-              >
-                <span className="list-color-dot" style={{ backgroundColor: list.color }} />
-                <strong>{list.name}</strong>
-                <small>{userName} - {count} produtos</small>
-              </button>
-            );
-          })
-        )}
+      <div className="panel product-detail-panel">
+        <div className="compact-product-list">
+          <div className="compact-product-header">
+            <button className="sort-header" type="button" onClick={() => toggleSort("name")}>
+              Nome do item
+              <SortIndicator active={sort.field === "name"} direction={sort.direction} />
+            </button>
+            <span>R$</span>
+            <button className="sort-header" type="button" onClick={() => toggleSort("quantity")}>
+              Qtd
+              <SortIndicator active={sort.field === "quantity"} direction={sort.direction} />
+            </button>
+            <span>Total</span>
+            <span />
+          </div>
+          {listProducts.length === 0 ? (
+            <EmptyState />
+          ) : (
+            listProducts.map((product) => (
+              <ProductGridRow
+                key={product.id}
+                product={product}
+                onDelete={onDeleteProduct}
+                onSave={(productId, draft) => {
+                  const original = productToEditDraft(product);
+                  if (draft.brand !== original.brand) {
+                    onInlineChange(productId, "brand", draft.brand);
+                  }
+                  if (draft.unitPrice !== original.unitPrice) {
+                    onInlineChange(productId, "unitPrice", draft.unitPrice);
+                  }
+                  if (draft.quantity !== original.quantity) {
+                    onInlineChange(productId, "quantity", draft.quantity);
+                  }
+                  if (draft.supermarket !== original.supermarket) {
+                    onInlineChange(productId, "supermarket", draft.supermarket);
+                  }
+                }}
+                onToggleBought={onToggleBought}
+              />
+            ))
+          )}
+        </div>
+        <div className="product-grid-footer product-grid-footer-sticky">
+          <span>Preco total da lista: <strong>{money(total)}</strong></span>
+          <span>Preco atual: <strong>{money(boughtTotal)}</strong></span>
+          <span>Comprados: <strong>{boughtCount}</strong></span>
+          <span>Conclusao: <strong>{completionRate}%</strong></span>
+        </div>
       </div>
 
-      {selectedList ? (
-        <div className="panel">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <span className="list-color-dot" style={{ backgroundColor: selectedList.color }} />
-              <div>
-                <h3 className="text-xl font-black">{selectedList.name}</h3>
-                <p className="text-sm text-supermarket-ink/60">
-                  {listProducts.length} produtos - {boughtCount} comprados - {money(total)}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button className="button-secondary" type="button" onClick={() => onEditList(selectedList.id)}>
-                <Edit3 size={16} />
-                Lista
-              </button>
-              <button className="button-secondary" type="button" onClick={() => setIsClearModalOpen(true)}>
-                <RefreshCcw size={16} />
-                Limpar campos
-              </button>
-              <button className="button-primary" type="button" onClick={() => setIsProductModalOpen(true)}>
-                <Plus size={16} />
-                Produto
-              </button>
-              <button className="danger-button" type="button" onClick={() => onDeleteList(selectedList.id)}>
-                <Trash2 size={16} />
-                Lista
-              </button>
-            </div>
-          </div>
-
-          <div className="compact-product-list">
-            <div className="compact-product-header">
-              <button className="sort-header" type="button" onClick={() => toggleSort("name")}>
-                Produto
-                <SortIndicator active={sort.field === "name"} direction={sort.direction} />
-              </button>
-              <span>Marca</span>
-              <span>Valor un.</span>
-              <button className="sort-header" type="button" onClick={() => toggleSort("quantity")}>
-                Qtd.
-                <SortIndicator active={sort.field === "quantity"} direction={sort.direction} />
-              </button>
-              <span>Supermercado</span>
-              <span>Total</span>
-              <span />
-            </div>
-            {listProducts.length === 0 ? (
-              <EmptyState />
-            ) : (
-              listProducts.map((product) => (
-                <div className={product.isBought ? "compact-product-row compact-product-row-done" : "compact-product-row"} key={product.id}>
-                  <div className="product-name-cell">
-                    <button
-                      className={product.isBought ? "status-bought" : "status-pending"}
-                      type="button"
-                      aria-label={product.isBought ? "Comprado" : "Nao comprado"}
-                      onClick={() => onToggleBought(product.id)}
-                    >
-                      {product.isBought ? <CheckCircle2 size={18} /> : <Circle size={18} />}
-                    </button>
-                    <strong title={product.name}>{product.name}</strong>
-                  </div>
-                  <input
-                    className="inline-input"
-                    value={product.brand ?? ""}
-                    placeholder="-"
-                    aria-label={`Marca de ${product.name}`}
-                    onChange={(event) => onInlineChange(product.id, "brand", event.target.value)}
-                  />
-                  <input
-                    className="inline-input inline-input-money"
-                    inputMode="decimal"
-                    value={product.unitPrice !== null ? product.unitPrice.toFixed(2).replace(".", ",") : ""}
-                    placeholder="-"
-                    aria-label={`Valor unitario de ${product.name}`}
-                    onChange={(event) => onInlineChange(product.id, "unitPrice", event.target.value)}
-                  />
-                  <input
-                    className="inline-input"
-                    inputMode="decimal"
-                    value={product.quantity ?? ""}
-                    placeholder="-"
-                    aria-label={`Quantidade de ${product.name}`}
-                    onChange={(event) => onInlineChange(product.id, "quantity", event.target.value)}
-                  />
-                  <span className="market-input-cell">
-                    <Store size={14} className="shrink-0 text-supermarket-leaf" />
-                    <input
-                      className="inline-input"
-                      value={product.supermarket || ""}
-                      placeholder="-"
-                      aria-label={`Supermercado de ${product.name}`}
-                      onChange={(event) => onInlineChange(product.id, "supermarket", event.target.value)}
-                    />
-                  </span>
-                  <span className="line-total">{money((product.quantity ?? 0) * (product.unitPrice ?? 0))}</span>
-                  <button className="icon-button" type="button" onClick={() => onDeleteProduct(product.id)} aria-label="Excluir produto">
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-          <div className="product-grid-footer">
-            <span>Total comprado: <strong>{money(boughtTotal)}</strong></span>
-            <span>Itens comprados: <strong>{boughtCount}</strong></span>
-            <span>Conclusao: <strong>{completionRate}%</strong></span>
-          </div>
-        </div>
-      ) : null}
       {isProductModalOpen ? <ProductModal onCancel={() => setIsProductModalOpen(false)} onSave={saveProductFromModal} /> : null}
-      {selectedList && isClearModalOpen ? (
+      {isClearModalOpen ? (
         <ClearFieldsModal
           onCancel={() => setIsClearModalOpen(false)}
           onConfirm={(fields) => {
@@ -1212,6 +1214,141 @@ function ShoppingList({
         />
       ) : null}
     </section>
+  );
+}
+
+function ProductGridRow({
+  product,
+  onToggleBought,
+  onSave,
+  onDelete
+}: {
+  product: Product;
+  onToggleBought: (productId: string) => void;
+  onSave: (productId: string, draft: ProductEditDraft) => void;
+  onDelete: (productId: string) => void;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState<ProductEditDraft>(() => productToEditDraft(product));
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraft(productToEditDraft(product));
+      setError("");
+    }
+  }, [isEditing, product]);
+
+  const parsedQuantity = parseOptionalNumber(draft.quantity);
+  const parsedPrice = parseMoney(draft.unitPrice);
+  const previewQuantity = parsedQuantity === undefined || parsedQuantity === null ? 0 : parsedQuantity;
+  const previewPrice = parsedPrice === undefined || parsedPrice === null ? 0 : parsedPrice;
+  const displayTotal = isEditing ? previewQuantity * previewPrice : (product.quantity ?? 0) * (product.unitPrice ?? 0);
+
+  function cancelEdit() {
+    setDraft(productToEditDraft(product));
+    setError("");
+    setIsEditing(false);
+  }
+
+  function saveEdit() {
+    setError("");
+    if (parsedQuantity === undefined) {
+      setError("Informe uma quantidade valida ou deixe em branco.");
+      return;
+    }
+    if (parsedPrice === undefined) {
+      setError("Informe um valor unitario valido ou deixe em branco.");
+      return;
+    }
+    onSave(product.id, draft);
+    setIsEditing(false);
+  }
+
+  return (
+    <div className={product.isBought ? "compact-product-row compact-product-row-done" : "compact-product-row"}>
+      <div className="product-name-cell">
+        <button
+          className={product.isBought ? "status-bought" : "status-pending"}
+          type="button"
+          aria-label={product.isBought ? "Comprado" : "Nao comprado"}
+          onClick={() => onToggleBought(product.id)}
+        >
+          {product.isBought ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+        </button>
+        <span className="product-name-stack">
+          <strong title={product.name}>{product.name}</strong>
+          {!isEditing && [product.brand, product.supermarket].filter(Boolean).length > 0 ? (
+            <small>{[product.brand, product.supermarket].filter(Boolean).join(" - ")}</small>
+          ) : null}
+        </span>
+      </div>
+      {isEditing ? (
+        <>
+          <input
+            className="inline-input inline-input-money"
+            inputMode="decimal"
+            value={draft.unitPrice}
+            placeholder="-"
+            aria-label={`Valor unitario de ${product.name}`}
+            onChange={(event) => setDraft({ ...draft, unitPrice: event.target.value })}
+          />
+          <input
+            className="inline-input"
+            inputMode="decimal"
+            value={draft.quantity}
+            placeholder="-"
+            aria-label={`Quantidade de ${product.name}`}
+            onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
+          />
+          <span className="line-total">{money(displayTotal)}</span>
+          <span />
+          <div className="compact-product-edit-panel">
+            <label className="field">
+              <span>Marca</span>
+              <input
+                className="input"
+                value={draft.brand}
+                onChange={(event) => setDraft({ ...draft, brand: event.target.value })}
+                placeholder="Opcional"
+              />
+            </label>
+            <label className="field">
+              <span>Supermercado</span>
+              <input
+                className="input"
+                value={draft.supermarket}
+                onChange={(event) => setDraft({ ...draft, supermarket: event.target.value })}
+                placeholder="Opcional"
+              />
+            </label>
+            <div className="row-edit-actions">
+              <button className="button-primary justify-center" type="button" onClick={saveEdit}>
+                Gravar
+              </button>
+              <button className="button-secondary justify-center" type="button" onClick={cancelEdit}>
+                Cancelar
+              </button>
+            </div>
+            {error ? <p className="row-edit-error">{error}</p> : null}
+          </div>
+        </>
+      ) : (
+        <>
+          <span className="line-value">{product.unitPrice !== null ? money(product.unitPrice) : "-"}</span>
+          <span className="line-value">{product.quantity ?? "-"}</span>
+          <span className="line-total">{money(displayTotal)}</span>
+          <span className="row-actions">
+            <button className="icon-button" type="button" onClick={() => setIsEditing(true)} aria-label="Editar produto">
+              <Edit3 size={16} />
+            </button>
+            <button className="icon-button" type="button" onClick={() => onDelete(product.id)} aria-label="Excluir produto">
+              <Trash2 size={16} />
+            </button>
+          </span>
+        </>
+      )}
+    </div>
   );
 }
 

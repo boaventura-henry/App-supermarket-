@@ -354,12 +354,12 @@
 
   .compact-product-header,
   .compact-product-row {
-    @apply grid min-w-[72rem] items-center gap-2 px-3;
-    grid-template-columns: minmax(15rem, 1.4fr) minmax(8rem, 0.7fr) 7rem 5.6rem minmax(10rem, 0.8fr) 7rem 2.8rem;
+    @apply grid min-w-[42rem] items-center gap-2 px-2 sm:px-3;
+    grid-template-columns: minmax(14rem, 1fr) 6.5rem 4.8rem 7rem 5.5rem;
   }
 
   .compact-product-header {
-    @apply sticky top-0 z-10 border-b border-supermarket-ink/10 bg-supermarket-mint/80 py-3 text-xs font-black uppercase text-supermarket-ink/65 backdrop-blur;
+    @apply sticky top-0 z-10 border-b border-supermarket-ink/10 bg-supermarket-mint/80 py-2 text-xs font-black uppercase text-supermarket-ink/65 backdrop-blur;
   }
 
   .sort-header {
@@ -375,7 +375,7 @@
   }
 
   .compact-product-row {
-    @apply min-h-12 border-t border-supermarket-ink/10 py-2 text-sm transition hover:bg-supermarket-mint/30;
+    @apply min-h-11 border-t border-supermarket-ink/10 py-1.5 text-sm transition hover:bg-supermarket-mint/30;
   }
 
   .product-name-cell {
@@ -386,12 +386,44 @@
     @apply min-w-0 truncate font-black;
   }
 
+  .product-name-stack {
+    @apply grid min-w-0 gap-0.5;
+  }
+
+  .product-name-stack small {
+    @apply truncate text-xs font-semibold text-supermarket-ink/50;
+  }
+
   .market-input-cell {
     @apply inline-flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-supermarket-ink/65;
   }
 
+  .line-value {
+    @apply truncate px-2 text-sm font-bold text-supermarket-ink/75;
+  }
+
   .line-total {
     @apply rounded-xl bg-supermarket-mint/60 px-2 py-1 text-right text-sm font-black text-supermarket-ink/75;
+  }
+
+  .row-actions {
+    @apply flex items-center justify-end gap-1;
+  }
+
+  .row-actions .icon-button {
+    @apply h-9 w-9 rounded-xl;
+  }
+
+  .compact-product-edit-panel {
+    @apply col-span-full grid gap-3 rounded-2xl border border-supermarket-ink/10 bg-supermarket-paper/70 p-3 sm:grid-cols-[1fr_1fr_auto];
+  }
+
+  .row-edit-actions {
+    @apply grid gap-2 sm:min-w-36;
+  }
+
+  .row-edit-error {
+    @apply col-span-full rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700;
   }
 
   .compact-product-row-done {
@@ -425,6 +457,14 @@
 
   .product-grid-footer {
     @apply mt-4 flex flex-col gap-2 rounded-2xl border border-supermarket-ink/10 bg-supermarket-mint/45 px-4 py-3 text-sm font-bold text-supermarket-ink/70 sm:flex-row sm:items-center sm:justify-end sm:gap-6;
+  }
+
+  .product-grid-footer-sticky {
+    @apply sticky bottom-3 z-10 shadow-soft backdrop-blur;
+  }
+
+  .product-detail-panel {
+    @apply pb-4;
   }
 
   .home-bar-list {
@@ -585,8 +625,23 @@
     color: #e9fff3;
   }
 
+  .theme-dark .line-value,
+  .theme-dark .product-name-stack small {
+    color: rgba(233, 255, 243, 0.68);
+  }
+
   .theme-dark .compact-product-row-done {
     background: rgba(233, 255, 243, 0.04);
+  }
+
+  .theme-dark .compact-product-edit-panel {
+    background: #020806;
+    border-color: rgba(125, 255, 176, 0.18);
+  }
+
+  .theme-dark .row-edit-error {
+    background: rgba(127, 29, 29, 0.28);
+    color: #fecaca;
   }
 
   .theme-dark .button-secondary,
