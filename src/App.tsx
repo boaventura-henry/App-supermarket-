@@ -69,7 +69,7 @@ type ListForm = {
   color: string;
 };
 
-type ProductSortField = "name" | "quantity";
+type ProductSortField = "original" | "name" | "quantity";
 
 type ProductSort = {
   field: ProductSortField;
@@ -447,6 +447,10 @@ export function App() {
     const supermarket = form.supermarket.trim();
     const timestamp = Date.now();
     updateDatabase((current) => {
+      const nextSortOrder =
+        current.products
+          .filter((product) => product.userId === currentUser.uid && product.listId === listId)
+          .reduce((max, product) => Math.max(max, Number.isFinite(product.sortOrder) ? product.sortOrder : -1), -1) + 1;
       const product: Product = {
         id: createId("prd"),
         userId: currentUser.uid,
@@ -457,7 +461,8 @@ export function App() {
         unitPrice,
         supermarket,
         timestamp,
-        isBought: false
+        isBought: false,
+        sortOrder: nextSortOrder
       };
       const history: PriceHistory[] =
         unitPrice !== null && unitPrice > 0
@@ -1031,7 +1036,7 @@ function ShoppingList({
   onClearFields: (listId: string, fields: ClearProductFields) => void;
   onDeleteProduct: (productId: string) => void;
 }) {
-  const [sort, setSort] = useState<ProductSort>({ field: "name", direction: "asc" });
+  const [sort, setSort] = useState<ProductSort>({ field: "original", direction: "asc" });
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -1043,10 +1048,25 @@ function ShoppingList({
     }
     const scopedProducts = products.filter((product) => product.listId === selectedList.id);
     return scopedProducts.slice().sort((a, b) => {
+      const boughtOrder = Number(a.isBought) - Number(b.isBought);
+      if (boughtOrder !== 0) {
+        return boughtOrder;
+      }
+
+      const originalOrder =
+        (Number.isFinite(a.sortOrder) ? a.sortOrder : a.timestamp) -
+          (Number.isFinite(b.sortOrder) ? b.sortOrder : b.timestamp) || a.timestamp - b.timestamp || a.id.localeCompare(b.id);
+      if (sort.field === "original") {
+        return originalOrder;
+      }
+
       const result =
         sort.field === "quantity"
           ? (a.quantity ?? Number.MAX_SAFE_INTEGER) - (b.quantity ?? Number.MAX_SAFE_INTEGER)
           : a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
+      if (result === 0) {
+        return originalOrder;
+      }
       return sort.direction === "asc" ? result : -result;
     });
   }, [products, selectedList, sort]);
