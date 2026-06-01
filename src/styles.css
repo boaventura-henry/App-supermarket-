@@ -185,6 +185,14 @@
     @apply rounded-xl px-2 py-1 text-sm font-bold text-supermarket-leaf transition hover:bg-supermarket-mint;
   }
 
+  .app-header-inner {
+    @apply mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:px-8;
+  }
+
+  .app-header-logo {
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-supermarket-leaf text-white sm:h-11 sm:w-11;
+  }
+
   .nav-button,
   .nav-button-active {
     @apply min-h-10 rounded-2xl border px-4 py-2 text-sm font-bold transition;
@@ -199,7 +207,7 @@
   }
 
   .menu-trigger {
-    @apply inline-flex min-h-11 w-fit items-center gap-2 rounded-2xl border border-supermarket-ink/15 bg-white px-4 py-2 font-bold text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
+    @apply inline-flex min-h-10 shrink-0 items-center gap-2 rounded-2xl border border-supermarket-ink/15 bg-white px-3 py-2 text-sm font-bold text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf sm:px-4;
   }
 
   .side-menu-overlay {
@@ -324,7 +332,7 @@
 
   .shopping-list-card,
   .shopping-list-card-active {
-    @apply flex min-h-24 flex-col items-start gap-1 rounded-3xl border bg-white p-4 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg;
+    @apply flex min-h-24 flex-col items-start gap-3 rounded-3xl border bg-white p-4 text-left shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg;
   }
 
   .shopping-list-card {
@@ -338,6 +346,30 @@
   .shopping-list-card small,
   .shared-list-row small {
     @apply block text-sm font-semibold text-supermarket-ink/55;
+  }
+
+  .shopping-list-card-main {
+    @apply flex w-full min-w-0 flex-1 items-start gap-3 text-left;
+  }
+
+  .shopping-list-card-main strong {
+    @apply block truncate text-base font-black;
+  }
+
+  .list-card-actions {
+    @apply flex w-full items-center justify-end gap-2 border-t border-supermarket-ink/10 pt-3;
+  }
+
+  .list-card-actions .icon-button {
+    @apply h-9 w-9 rounded-xl;
+  }
+
+  .danger-icon-button {
+    @apply border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800;
+  }
+
+  .list-back-button {
+    @apply inline-flex min-h-10 items-center gap-2 rounded-2xl px-2 py-2 text-sm font-black text-supermarket-leaf transition hover:bg-supermarket-mint;
   }
 
   .list-color-dot {
@@ -684,6 +716,20 @@
     background: rgba(127, 29, 29, 0.28);
     border-color: rgba(252, 165, 165, 0.34);
     color: #fecaca;
+  }
+
+  .theme-dark .danger-icon-button {
+    background: rgba(127, 29, 29, 0.28);
+    border-color: rgba(252, 165, 165, 0.34);
+    color: #fecaca;
+  }
+
+  .theme-dark .list-card-actions {
+    border-color: rgba(125, 255, 176, 0.16);
+  }
+
+  .theme-dark .list-back-button {
+    color: #7dffb0;
   }
 
   .theme-dark .side-menu {

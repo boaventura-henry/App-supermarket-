@@ -618,14 +618,14 @@ export function App() {
   return (
     <main className={`${themeClass} min-h-screen bg-supermarket-paper text-supermarket-ink`}>
       <header className="sticky top-0 z-20 border-b border-supermarket-ink/10 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-supermarket-leaf text-white">
-              <ShoppingBasket size={24} />
+        <div className="app-header-inner">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="app-header-logo">
+              <ShoppingBasket size={21} />
             </div>
-            <div>
-              <p className="text-sm text-supermarket-ink/60">{currentUser.name}</p>
-              <h1 className="text-xl font-black">App Supermarket</h1>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-bold text-supermarket-ink/60">{currentUser.name}</p>
+              <h1 className="truncate text-lg font-black sm:text-xl">App Supermarket</h1>
             </div>
           </div>
           <button
@@ -636,7 +636,7 @@ export function App() {
             aria-expanded={isMenuOpen}
             aria-controls="app-side-menu"
           >
-            <Menu size={24} />
+            <Menu size={21} />
             <span>Menu</span>
           </button>
         </div>
@@ -1088,18 +1088,34 @@ function ShoppingList({
             lists.map((list) => {
               const count = products.filter((product) => product.listId === list.id).length;
               return (
-                <button
-                  className="shopping-list-card"
-                  key={list.id}
-                  type="button"
-                  onClick={() => onSelectList(list.id)}
-                >
-                  <span className="list-color-dot" style={{ backgroundColor: list.color }} />
-                  <strong>{list.name}</strong>
-                  <small>
-                    {userName} - {count} {count === 1 ? "item" : "itens"}
-                  </small>
-                </button>
+                <article className="shopping-list-card" key={list.id}>
+                  <button className="shopping-list-card-main" type="button" onClick={() => onSelectList(list.id)}>
+                    <span className="list-color-dot" style={{ backgroundColor: list.color }} />
+                    <span className="min-w-0">
+                      <strong>{list.name}</strong>
+                      <small>
+                        {userName} - {count} {count === 1 ? "item" : "itens"}
+                      </small>
+                    </span>
+                  </button>
+                  <div className="list-card-actions">
+                    <button className="icon-button" type="button" onClick={() => onEditList(list.id)} aria-label="Editar lista">
+                      <Edit3 size={16} />
+                    </button>
+                    <button
+                      className="icon-button danger-icon-button"
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(`Excluir a lista "${list.name}"?`)) {
+                          onDeleteList(list.id);
+                        }
+                      }}
+                      aria-label="Excluir lista"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </article>
               );
             })
           )}
@@ -1122,12 +1138,8 @@ function ShoppingList({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="button-secondary" type="button" onClick={onBackToLists}>
-            Listas
-          </button>
-          <button className="button-secondary" type="button" onClick={() => onEditList(selectedList.id)}>
-            <Edit3 size={16} />
-            Editar lista
+          <button className="list-back-button" type="button" onClick={onBackToLists}>
+            Voltar
           </button>
           <button className="button-secondary" type="button" onClick={() => setIsClearModalOpen(true)}>
             <RefreshCcw size={16} />
@@ -1136,10 +1148,6 @@ function ShoppingList({
           <button className="button-primary" type="button" onClick={() => setIsProductModalOpen(true)}>
             <Plus size={16} />
             Produto
-          </button>
-          <button className="danger-button" type="button" onClick={() => onDeleteList(selectedList.id)}>
-            <Trash2 size={16} />
-            Excluir lista
           </button>
         </div>
       </div>
