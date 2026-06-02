@@ -1292,6 +1292,7 @@ function ShoppingList({
             <span>Valor unit.</span>
             <span>Marca</span>
             <span>Supermercado</span>
+            <span>Valor total</span>
             <span />
           </div>
           {listProducts.length === 0 ? (
@@ -1369,6 +1370,9 @@ function ProductGridRow({
 
   const parsedQuantity = parseOptionalNumber(draft.quantity);
   const parsedPrice = parseMoney(draft.unitPrice);
+  const rowQuantity = isEditing ? (parsedQuantity === undefined || parsedQuantity === null ? 0 : parsedQuantity) : product.quantity ?? 0;
+  const rowUnitPrice = isEditing ? (parsedPrice === undefined || parsedPrice === null ? 0 : parsedPrice) : product.unitPrice ?? 0;
+  const rowTotal = rowQuantity * rowUnitPrice;
 
   function startEdit() {
     if (readOnly) {
@@ -1464,6 +1468,7 @@ function ProductGridRow({
             placeholder="Opcional"
             aria-label={`Supermercado de ${product.name}`}
           />
+          <span className="line-total">{money(rowTotal)}</span>
           <span className="row-actions">
             <button className="icon-button row-save-button" type="button" onClick={saveEdit} aria-label="Gravar produto">
               <Save size={16} />
@@ -1497,6 +1502,7 @@ function ProductGridRow({
           <button className="inline-value-button" type="button" onClick={startEdit} disabled={readOnly} title={readOnly ? readOnlyReason : undefined}>
             {product.supermarket || "-"}
           </button>
+          <span className="line-total">{money(rowTotal)}</span>
           {readOnly ? (
             <span className="row-actions readonly-actions" title={readOnlyReason}>
               Somente leitura
