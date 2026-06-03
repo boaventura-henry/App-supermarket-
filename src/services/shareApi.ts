@@ -1,7 +1,7 @@
-import type { SharedListAccess } from "../types";
+import type { ShareRole, SharedListAccess } from "../types";
 import { apiRequest } from "./apiClient";
 
-export type ShareRole = "VIEWER" | "EDITOR";
+export type { ShareRole };
 
 export function getShares(listId: string) {
   return apiRequest<SharedListAccess[]>(

@@ -250,7 +250,11 @@
 
   .side-menu-nav .nav-button,
   .side-menu-nav .nav-button-active {
-    @apply flex w-full justify-start px-4 py-3 text-left;
+    @apply flex w-full items-center justify-between gap-3 px-4 py-3 text-left;
+  }
+
+  .menu-badge {
+    @apply inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-supermarket-leaf px-2 text-xs font-black text-white;
   }
 
   .side-menu-footer {
@@ -503,6 +507,10 @@
     @apply mb-4 rounded-2xl border border-supermarket-leaf/20 bg-supermarket-mint/55 px-4 py-3 text-sm font-bold text-supermarket-ink/75;
   }
 
+  .realtime-banner {
+    @apply mb-4 flex flex-col gap-2 rounded-2xl border border-supermarket-leaf/20 bg-supermarket-mint/55 px-4 py-3 text-sm font-bold text-supermarket-ink/75 sm:flex-row sm:items-center sm:justify-between;
+  }
+
   .compact-product-edit-panel {
     @apply col-span-full grid gap-3 rounded-2xl border border-supermarket-ink/10 bg-supermarket-paper/70 p-3 sm:grid-cols-[1fr_1fr_auto];
   }
@@ -653,6 +661,41 @@
     @apply flex items-center gap-3 rounded-2xl border border-supermarket-ink/10 bg-white px-4 py-3 shadow-soft;
   }
 
+  .invite-card {
+    @apply grid gap-4 rounded-3xl border border-supermarket-ink/10 bg-white p-4 shadow-soft sm:grid-cols-[1fr_auto] sm:items-center;
+  }
+
+  .invite-card h3,
+  .notification-card h3 {
+    @apply truncate text-lg font-black;
+  }
+
+  .invite-card p,
+  .notification-card p {
+    @apply mt-1 text-sm font-semibold text-supermarket-ink/65;
+  }
+
+  .invite-card small,
+  .notification-card small {
+    @apply mt-2 block text-xs font-bold text-supermarket-ink/45;
+  }
+
+  .invite-actions {
+    @apply grid gap-2 sm:grid-cols-2;
+  }
+
+  .notification-card {
+    @apply grid gap-3 rounded-3xl border border-supermarket-ink/10 bg-white p-4 shadow-soft sm:grid-cols-[auto_1fr_auto] sm:items-center;
+  }
+
+  .notification-card-unread {
+    @apply border-supermarket-leaf/30 bg-supermarket-mint/35;
+  }
+
+  .notification-icon {
+    @apply flex h-11 w-11 items-center justify-center rounded-2xl bg-supermarket-mint text-supermarket-leaf;
+  }
+
   .product-row-done {
     @apply opacity-60;
   }
@@ -708,6 +751,8 @@
   .theme-dark .product-modal,
   .theme-dark .shared-list-row,
   .theme-dark .share-row,
+  .theme-dark .invite-card,
+  .theme-dark .notification-card,
   .theme-dark .product-row,
   .theme-dark .history-row,
   .theme-dark .chart-shell {
@@ -787,6 +832,10 @@
   .theme-dark .shopping-list-card small,
   .theme-dark .shared-list-row small,
   .theme-dark .share-row small,
+  .theme-dark .invite-card p,
+  .theme-dark .invite-card small,
+  .theme-dark .notification-card p,
+  .theme-dark .notification-card small,
   .theme-dark .history-row small,
   .theme-dark .product-grid-footer,
   .theme-dark .empty-chart {
@@ -883,6 +932,13 @@
   }
 
   .theme-dark .readonly-banner {
+    background: rgba(109, 247, 167, 0.12);
+    border-color: rgba(125, 255, 176, 0.24);
+    color: rgba(233, 255, 243, 0.86);
+  }
+
+  .theme-dark .realtime-banner,
+  .theme-dark .notification-card-unread {
     background: rgba(109, 247, 167, 0.12);
     border-color: rgba(125, 255, 176, 0.24);
     color: rgba(233, 255, 243, 0.86);

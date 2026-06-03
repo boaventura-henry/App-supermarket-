@@ -13,6 +13,7 @@ export type ProductPayload = {
   unitPrice?: unknown;
   supermarket?: unknown;
   purchased?: unknown;
+  expectedUpdatedAt?: unknown;
 };
 
 export async function getProducts(listId: unknown, userId: unknown) {
@@ -63,6 +64,7 @@ export async function updateProduct(id: unknown, payload: ProductPayload) {
   const productId = requireString(id, "Informe o id do produto.");
   const user = await requireUser(payload.userId);
   const current = await requireProductEditor(productId, user.id);
+  validateExpectedUpdatedAt(payload.expectedUpdatedAt, current.updatedAt);
   const data: ProductUpdateInput = {};
 
   if (payload.name !== undefined) {
@@ -194,6 +196,19 @@ function parseOptionalDecimal(value: unknown, message: string, decimalPlaces: nu
   }
 
   return new Prisma.Decimal(parsed.toFixed(decimalPlaces));
+}
+
+function validateExpectedUpdatedAt(value: unknown, currentUpdatedAt: Date) {
+  if (value === undefined || value === null || value === "") {
+    return;
+  }
+  if (typeof value !== "string") {
+    throw new AppError(400, "Informe a versao esperada do produto.");
+  }
+  const expected = Date.parse(value);
+  if (!Number.isFinite(expected) || expected !== currentUpdatedAt.getTime()) {
+    throw new AppError(409, "Este item foi alterado por outro usuario. Recarregue a linha antes de salvar.");
+  }
 }
 
 function mapProduct(product: ProductRecord) {

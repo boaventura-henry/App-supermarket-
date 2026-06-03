@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import {
   ArrowUpDown,
   BarChart3,
+  Bell,
   CheckCircle2,
   Circle,
   Edit3,
@@ -38,7 +39,7 @@ import {
   saveDatabase,
   sortByNewest
 } from "./storage";
-import type { AppDatabase, ListAccessRole, PriceHistory, Product, SharedListAccess, ShoppingList, User, View } from "./types";
+import type { AppDatabase, AppNotification, ListAccessRole, ListInvite, PriceHistory, Product, SharedListAccess, ShoppingList, User, View } from "./types";
 import {
   createPasskeyForUser,
   describePasskeyError,
@@ -72,7 +73,24 @@ import {
   type MigrationResult
 } from "./services/migrationApi";
 import {
-  createShare,
+  acceptInvite,
+  cancelInvite,
+  createInvite,
+  declineInvite,
+  getListInvites,
+  getMyInvites
+} from "./services/inviteApi";
+import {
+  getNotifications,
+  markAllAsRead,
+  markAsRead
+} from "./services/notificationApi";
+import {
+  broadcastListEvent,
+  subscribeToList,
+  type ListRealtimeEvent
+} from "./services/realtimeService";
+import {
   deleteShare,
   getShares,
   updateShare,
@@ -259,6 +277,10 @@ export function App() {
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [invites, setInvites] = useState<ListInvite[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [collaborationNotice, setCollaborationNotice] = useState("");
+  const [presenceCount, setPresenceCount] = useState(1);
 
   useEffect(() => {
     saveDatabase(database);
@@ -356,6 +378,46 @@ export function App() {
       isMounted = false;
     };
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!USE_SUPABASE_AUTH || !currentUser) {
+      setInvites([]);
+      setNotifications([]);
+      return;
+    }
+
+    void refreshCollaborationInbox();
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || !selectedListId || (!USE_REMOTE_PRODUCTS && !USE_REMOTE_LISTS)) {
+      setPresenceCount(1);
+      return;
+    }
+
+    let refreshTimer: ReturnType<typeof window.setTimeout> | null = null;
+    const unsubscribe = subscribeToList(selectedListId, {
+      userId: currentUser.uid,
+      userName: currentUser.name,
+      onRemoteEvent: (event) => {
+        setCollaborationNotice(collaborationMessage(event));
+        if (refreshTimer) {
+          window.clearTimeout(refreshTimer);
+        }
+        refreshTimer = window.setTimeout(() => {
+          void refreshSelectedRemoteList(selectedListId, currentUser.uid);
+        }, 500);
+      },
+      onPresenceChange: setPresenceCount
+    });
+
+    return () => {
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer);
+      }
+      unsubscribe();
+    };
+  }, [currentUser, selectedListId]);
 
   useEffect(() => {
     if (!USE_REMOTE_PRODUCTS || !currentUser || !selectedListId) {
@@ -478,6 +540,46 @@ export function App() {
     }
     const history = await getRemotePriceHistory(userId);
     setDatabase((current) => replacePriceHistoryForUser(current, userId, history));
+  }
+
+  async function refreshCollaborationInbox() {
+    try {
+      const [nextInvites, nextNotifications] = await Promise.all([getMyInvites(), getNotifications()]);
+      setInvites(nextInvites);
+      setNotifications(nextNotifications);
+    } catch (error) {
+      console.error("Nao foi possivel atualizar convites/notificacoes.", error);
+    }
+  }
+
+  async function refreshRemoteLists(userId: string) {
+    if (!USE_REMOTE_LISTS) {
+      return;
+    }
+    const lists = await getRemoteLists(userId);
+    setDatabase((current) => replaceVisibleLists(current, userId, lists.map(toLocalShoppingList)));
+  }
+
+  async function refreshSelectedRemoteList(listId: string, userId: string) {
+    await Promise.all([
+      USE_REMOTE_LISTS ? refreshRemoteLists(userId) : Promise.resolve(),
+      USE_REMOTE_PRODUCTS
+        ? getRemoteProducts(listId, userId).then((products) => {
+            setDatabase((current) => replaceProductsForList(current, listId, products));
+          })
+        : Promise.resolve(),
+      USE_REMOTE_PRICE_HISTORY ? refreshRemotePriceHistory(userId) : Promise.resolve()
+    ]);
+  }
+
+  function collaborationMessage(event: ListRealtimeEvent) {
+    if (event.startsWith("product:")) {
+      return "Esta lista foi atualizada por outro usuario.";
+    }
+    if (event === "list:access-changed") {
+      return "As permissoes desta lista foram atualizadas.";
+    }
+    return "Os dados da lista foram atualizados.";
   }
 
   function reportRemoteProductError(error: unknown, fallbackMessage: string) {
@@ -680,6 +782,10 @@ export function App() {
     setEditingListId(null);
     setPasskeyMessage("");
     setPasskeyError("");
+    setInvites([]);
+    setNotifications([]);
+    setCollaborationNotice("");
+    setPresenceCount(1);
     setIsMenuOpen(false);
   }
 
@@ -689,6 +795,48 @@ export function App() {
       setSelectedListId(null);
     }
     setIsMenuOpen(false);
+  }
+
+  async function acceptPendingInvite(invite: ListInvite) {
+    if (!currentUser) {
+      return;
+    }
+    try {
+      await acceptInvite(invite.id);
+      await Promise.all([refreshCollaborationInbox(), refreshRemoteLists(currentUser.uid)]);
+      void broadcastListEvent(invite.listId, "list:access-changed");
+      setView("list");
+      setSelectedListId(invite.listId);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Nao foi possivel aceitar o convite.");
+    }
+  }
+
+  async function declinePendingInvite(invite: ListInvite) {
+    try {
+      await declineInvite(invite.id);
+      await refreshCollaborationInbox();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Nao foi possivel recusar o convite.");
+    }
+  }
+
+  async function readNotification(notificationId: string) {
+    try {
+      await markAsRead(notificationId);
+      await refreshCollaborationInbox();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Nao foi possivel marcar como lida.");
+    }
+  }
+
+  async function readAllNotifications() {
+    try {
+      await markAllAsRead();
+      await refreshCollaborationInbox();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Nao foi possivel marcar notificacoes como lidas.");
+    }
   }
 
   function saveShoppingList(form: ListForm) {
@@ -715,6 +863,7 @@ export function App() {
               ...current,
               lists: current.lists.map((list) => (list.id === existing.id ? toLocalShoppingList(remoteList) : list))
             }));
+            void broadcastListEvent(existing.id, "list:updated");
           })
           .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar a lista remota."));
         setEditingListId(null);
@@ -848,6 +997,7 @@ export function App() {
           void refreshRemotePriceHistory(currentUser.uid).catch((error) =>
             reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
           );
+          void broadcastListEvent(listId, "product:created");
         })
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o produto."));
       return;
@@ -928,6 +1078,9 @@ export function App() {
             ...current,
             products: current.products.filter((product) => product.id !== productId)
           }));
+          if (target) {
+            void broadcastListEvent(target.listId, "product:deleted");
+          }
         })
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel excluir o produto."));
       return;
@@ -958,6 +1111,7 @@ export function App() {
       void toggleRemotePurchased(productId, currentUser.uid, !target.isBought)
         .then((product) => {
           updateDatabase((current) => upsertProduct(current, product));
+          void broadcastListEvent(target.listId, "product:purchased");
         })
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar o status do produto."));
       return;
@@ -1005,7 +1159,8 @@ export function App() {
         brand: nextBrand,
         quantity: nextQuantity,
         unitPrice: nextUnitPrice,
-        supermarket: nextSupermarket
+        supermarket: nextSupermarket,
+        expectedUpdatedAt: target.updatedAt
       })
         .then((updated) => {
           const historyPrice =
@@ -1033,6 +1188,7 @@ export function App() {
           void refreshRemotePriceHistory(currentUser.uid).catch((error) =>
             reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
           );
+          void broadcastListEvent(target.listId, "product:updated");
         })
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar o produto."));
       return;
@@ -1139,6 +1295,7 @@ export function App() {
             ...products.reduce((next, product) => upsertProduct(next, product), current),
             lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
           }));
+          void broadcastListEvent(listId, "product:updated");
         })
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel limpar os campos da lista."));
       return;
@@ -1194,6 +1351,9 @@ export function App() {
     );
   }
 
+  const pendingInviteCount = invites.filter((invite) => invite.status === "PENDING").length;
+  const unreadNotificationCount = notifications.filter((notification) => !notification.readAt).length;
+
   return (
     <main className={`${themeClass} min-h-screen bg-supermarket-paper text-supermarket-ink`}>
       <header className="sticky top-0 z-20 border-b border-supermarket-ink/10 bg-white/95 backdrop-blur">
@@ -1231,6 +1391,8 @@ export function App() {
         theme={theme}
         userName={currentUser.name}
         enableMigration={ENABLE_LOCAL_DATA_MIGRATION}
+        pendingInviteCount={pendingInviteCount}
+        unreadNotificationCount={unreadNotificationCount}
       />
 
       {view === "home" ? <Home products={userData.products} /> : null}
@@ -1255,6 +1417,9 @@ export function App() {
           onInlineChange={saveProductInline}
           onClearFields={clearProductFields}
           onDeleteProduct={deleteProduct}
+          collaborationNotice={collaborationNotice}
+          onDismissCollaborationNotice={() => setCollaborationNotice("")}
+          presenceCount={presenceCount}
         />
       ) : null}
 
@@ -1274,6 +1439,19 @@ export function App() {
           onInlineChange={saveProductInline}
           onClearFields={clearProductFields}
           onDeleteProduct={deleteProduct}
+        />
+      ) : null}
+
+      {view === "invites" ? (
+        <InvitesView invites={invites} onAccept={acceptPendingInvite} onDecline={declinePendingInvite} onRefresh={refreshCollaborationInbox} />
+      ) : null}
+
+      {view === "notifications" ? (
+        <NotificationsView
+          notifications={notifications}
+          onMarkRead={readNotification}
+          onMarkAllRead={readAllNotifications}
+          onRefresh={refreshCollaborationInbox}
         />
       ) : null}
 
@@ -1617,7 +1795,10 @@ function ShoppingList({
   onToggleBought,
   onInlineChange,
   onClearFields,
-  onDeleteProduct
+  onDeleteProduct,
+  collaborationNotice = "",
+  onDismissCollaborationNotice,
+  presenceCount = 1
 }: {
   lists: ShoppingList[];
   products: Product[];
@@ -1640,6 +1821,9 @@ function ShoppingList({
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
   onClearFields: (listId: string, fields: ClearProductFields) => void;
   onDeleteProduct: (productId: string) => void;
+  collaborationNotice?: string;
+  onDismissCollaborationNotice?: () => void;
+  presenceCount?: number;
 }) {
   const [sort, setSort] = useState<ProductSort>({ field: "original", direction: "asc" });
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -1815,6 +1999,9 @@ function ShoppingList({
             <p className="text-sm text-supermarket-ink/60">
               {creatorLabel(selectedList)} - {listRoleLabel(selectedListRole)} - {listProducts.length} itens - {boughtCount} comprados - {money(total)}
             </p>
+            <p className="text-xs font-bold text-supermarket-ink/45">
+              {presenceCount > 1 ? `${presenceCount} usuarios online nesta lista` : "Voce esta visualizando esta lista"}
+            </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1843,6 +2030,14 @@ function ShoppingList({
       </div>
 
       {!canEditProducts ? <div className="readonly-banner">Visualizacao somente leitura. O dono da lista concedeu acesso de visualizador.</div> : null}
+      {collaborationNotice ? (
+        <div className="realtime-banner">
+          <span>{collaborationNotice}</span>
+          <button className="link-button" type="button" onClick={onDismissCollaborationNotice}>
+            Dispensar
+          </button>
+        </div>
+      ) : null}
 
       {isListOwner && editingListId ? (
         <ListEditor
@@ -2347,6 +2542,7 @@ function ClearFieldsModal({
 
 function ShareListModal({ list, onCancel }: { list: ShoppingList; onCancel: () => void }) {
   const [shares, setShares] = useState<SharedListAccess[]>([]);
+  const [listInvites, setListInvites] = useState<ListInvite[]>([]);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<ShareRole>("VIEWER");
   const [message, setMessage] = useState("");
@@ -2357,10 +2553,11 @@ function ShareListModal({ list, onCancel }: { list: ShoppingList; onCancel: () =
   useEffect(() => {
     let isMounted = true;
     setIsLoading(true);
-    getShares(list.id)
-      .then((items) => {
+    Promise.all([getShares(list.id), getListInvites(list.id)])
+      .then(([items, invites]) => {
         if (isMounted) {
           setShares(items);
+          setListInvites(invites);
           setError("");
         }
       })
@@ -2392,13 +2589,13 @@ function ShareListModal({ list, onCancel }: { list: ShoppingList; onCancel: () =
 
     setIsSaving(true);
     try {
-      const share = await createShare(list.id, normalizedEmail, role);
-      setShares((current) => [...current.filter((item) => item.id !== share.id), share]);
+      const invite = await createInvite(list.id, { email: normalizedEmail, role });
+      setListInvites((current) => [invite, ...current.filter((item) => item.id !== invite.id)]);
       setEmail("");
       setRole("VIEWER");
-      setMessage("Lista compartilhada com sucesso.");
+      setMessage("Convite enviado com sucesso.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel compartilhar a lista.");
+      setError(err instanceof Error ? err.message : "Nao foi possivel enviar o convite.");
     } finally {
       setIsSaving(false);
     }
@@ -2432,6 +2629,22 @@ function ShareListModal({ list, onCancel }: { list: ShoppingList; onCancel: () =
     }
   }
 
+  async function removeInvite(invite: ListInvite) {
+    if (!window.confirm(`Cancelar convite para ${invite.invitedEmail}?`)) {
+      return;
+    }
+
+    setError("");
+    setMessage("");
+    try {
+      const canceled = await cancelInvite(invite.id);
+      setListInvites((current) => current.map((item) => (item.id === canceled.id ? canceled : item)));
+      setMessage("Convite cancelado.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel cancelar o convite.");
+    }
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
       <form className="product-modal share-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
@@ -2444,7 +2657,7 @@ function ShareListModal({ list, onCancel }: { list: ShoppingList; onCancel: () =
               <p className="text-sm font-bold uppercase text-supermarket-leaf">Compartilhamento</p>
               <h4 className="text-xl font-black">Compartilhar "{list.name}"</h4>
               <p className="mt-1 text-sm font-semibold text-supermarket-ink/60">
-                Editor pode alterar produtos. Visualizador apenas consulta a lista.
+                Envie um convite. Editor pode alterar produtos. Visualizador apenas consulta a lista.
               </p>
             </div>
           </div>
@@ -2478,10 +2691,34 @@ function ShareListModal({ list, onCancel }: { list: ShoppingList; onCancel: () =
 
         <button className="button-primary mt-5 justify-center" type="submit" disabled={isSaving}>
           <UserPlus size={18} />
-          {isSaving ? "Compartilhando..." : "Compartilhar lista"}
+          {isSaving ? "Enviando..." : "Enviar convite"}
         </button>
 
         <div className="mt-6">
+          <h5 className="mb-3 text-sm font-black uppercase text-supermarket-ink/60">Convites pendentes</h5>
+          {isLoading ? (
+            <p className="text-sm font-semibold text-supermarket-ink/60">Carregando...</p>
+          ) : listInvites.filter((invite) => invite.status === "PENDING").length === 0 ? (
+            <p className="text-sm font-semibold text-supermarket-ink/60">Nenhum convite pendente.</p>
+          ) : (
+            <div className="share-list">
+              {listInvites
+                .filter((invite) => invite.status === "PENDING")
+                .map((invite) => (
+                  <div className="share-row" key={invite.id}>
+                    <div className="min-w-0">
+                      <strong>{invite.invitedEmail}</strong>
+                      <small>{listRoleLabel(invite.role)}</small>
+                    </div>
+                    <span className="role-pill">Pendente</span>
+                    <button className="icon-button danger-icon-button" type="button" onClick={() => void removeInvite(invite)} aria-label="Cancelar convite">
+                      <X size={16} />
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
+
           <h5 className="mb-3 text-sm font-black uppercase text-supermarket-ink/60">Usuarios com acesso</h5>
           {isLoading ? (
             <p className="text-sm font-semibold text-supermarket-ink/60">Carregando...</p>
@@ -2662,6 +2899,127 @@ function SharedListsContent(props: {
       onClearFields={props.onClearFields}
       onDeleteProduct={props.onDeleteProduct}
     />
+  );
+}
+
+function InvitesView({
+  invites,
+  onAccept,
+  onDecline,
+  onRefresh
+}: {
+  invites: ListInvite[];
+  onAccept: (invite: ListInvite) => void;
+  onDecline: (invite: ListInvite) => void;
+  onRefresh: () => void;
+}) {
+  const pendingInvites = invites.filter((invite) => invite.status === "PENDING");
+
+  return (
+    <section className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-black uppercase text-supermarket-leaf">Convites</p>
+          <h2 className="text-2xl font-black">Listas compartilhadas com voce</h2>
+          <p className="text-supermarket-ink/60">Aceite ou recuse convites recebidos pelo seu e-mail.</p>
+        </div>
+        <button className="button-secondary justify-center" type="button" onClick={onRefresh}>
+          <RefreshCcw size={16} />
+          Atualizar
+        </button>
+      </div>
+
+      {pendingInvites.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <div className="grid gap-3">
+          {pendingInvites.map((invite) => (
+            <article className="invite-card" key={invite.id}>
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="list-color-dot mt-2" style={{ backgroundColor: invite.listColor }} />
+                <div className="min-w-0">
+                  <h3>{invite.listName}</h3>
+                  <p>
+                    {invite.ownerName} ({invite.ownerEmail}) ofereceu acesso como {listRoleLabel(invite.role)}.
+                  </p>
+                  <small>Enviado em {dateFormatter.format(Date.parse(invite.createdAt))}</small>
+                </div>
+              </div>
+              <div className="invite-actions">
+                <button className="button-primary justify-center" type="button" onClick={() => onAccept(invite)}>
+                  <CheckCircle2 size={17} />
+                  Aceitar
+                </button>
+                <button className="button-secondary justify-center" type="button" onClick={() => onDecline(invite)}>
+                  <X size={17} />
+                  Recusar
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function NotificationsView({
+  notifications,
+  onMarkRead,
+  onMarkAllRead,
+  onRefresh
+}: {
+  notifications: AppNotification[];
+  onMarkRead: (notificationId: string) => void;
+  onMarkAllRead: () => void;
+  onRefresh: () => void;
+}) {
+  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+
+  return (
+    <section className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-black uppercase text-supermarket-leaf">Notificacoes</p>
+          <h2 className="text-2xl font-black">Atualizacoes do app</h2>
+          <p className="text-supermarket-ink/60">{unreadCount} notificacoes nao lidas.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button className="button-secondary justify-center" type="button" onClick={onRefresh}>
+            <RefreshCcw size={16} />
+            Atualizar
+          </button>
+          <button className="button-primary justify-center" type="button" onClick={onMarkAllRead} disabled={unreadCount === 0}>
+            <CheckCircle2 size={17} />
+            Marcar todas
+          </button>
+        </div>
+      </div>
+
+      {notifications.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <div className="grid gap-3">
+          {notifications.map((notification) => (
+            <article className={notification.readAt ? "notification-card" : "notification-card notification-card-unread"} key={notification.id}>
+              <div className="notification-icon" aria-hidden="true">
+                <Bell size={18} />
+              </div>
+              <div className="min-w-0">
+                <h3>{notification.title}</h3>
+                <p>{notification.message}</p>
+                <small>{dateFormatter.format(Date.parse(notification.createdAt))}</small>
+              </div>
+              {!notification.readAt ? (
+                <button className="button-secondary justify-center" type="button" onClick={() => onMarkRead(notification.id)}>
+                  Marcar lida
+                </button>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -3128,7 +3486,9 @@ function SideMenu({
   onToggleTheme,
   theme,
   userName,
-  enableMigration
+  enableMigration,
+  pendingInviteCount,
+  unreadNotificationCount
 }: {
   currentView: View;
   isOpen: boolean;
@@ -3139,6 +3499,8 @@ function SideMenu({
   theme: ThemeMode;
   userName: string;
   enableMigration: boolean;
+  pendingInviteCount: number;
+  unreadNotificationCount: number;
 }) {
   return (
     <>
@@ -3173,6 +3535,14 @@ function SideMenu({
           <NavButton active={currentView === "shared"} onClick={() => onNavigate("shared")}>
             Compartilhadas
           </NavButton>
+          <NavButton active={currentView === "invites"} onClick={() => onNavigate("invites")}>
+            <span>Convites</span>
+            <MenuBadge count={pendingInviteCount} />
+          </NavButton>
+          <NavButton active={currentView === "notifications"} onClick={() => onNavigate("notifications")}>
+            <span>Notificacoes</span>
+            <MenuBadge count={unreadNotificationCount} />
+          </NavButton>
           <NavButton active={currentView === "dashboard"} onClick={() => onNavigate("dashboard")}>
             Dashboard
           </NavButton>
@@ -3196,6 +3566,13 @@ function SideMenu({
       </aside>
     </>
   );
+}
+
+function MenuBadge({ count }: { count: number }) {
+  if (count <= 0) {
+    return null;
+  }
+  return <span className="menu-badge">{count > 9 ? "9+" : count}</span>;
 }
 
 function ThemeButton({ theme, onToggle }: { theme: ThemeMode; onToggle: () => void }) {

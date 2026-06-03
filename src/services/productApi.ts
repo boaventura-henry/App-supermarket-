@@ -28,6 +28,7 @@ export type ProductPayload = {
   quantity?: number | string | null;
   unitPrice?: number | string | null;
   supermarket?: string;
+  expectedUpdatedAt?: string;
 };
 
 export async function getProducts(listId: string, userId: string) {
@@ -100,7 +101,8 @@ function toLocalProduct(product: RemoteProduct, fallbackUserId: string, fallback
     supermarket: product.supermarket ?? "",
     timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
     isBought: product.purchased ?? Boolean(product.isBought),
-    sortOrder: Number.isFinite(product.sortOrder) ? product.sortOrder : 0
+    sortOrder: Number.isFinite(product.sortOrder) ? product.sortOrder : 0,
+    updatedAt: product.updatedAt
   };
 }
 

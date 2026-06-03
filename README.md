@@ -262,6 +262,76 @@ Realtime:
 
 - Supabase Realtime nao foi ativado nesta fase. As listas compartilhadas sao carregadas por chamadas HTTP quando as feature flags remotas estao ligadas. A sincronizacao em tempo real pode ser adicionada em uma fase posterior usando canais do Supabase filtrados por lista/usuario.
 
+## Convites, notificacoes e Realtime - fase 8
+
+Esta fase melhora a colaboracao entre usuarios com convites pendentes, notificacoes internas e sincronizacao em tempo real da lista aberta. O Prisma continua restrito ao backend/API e o Supabase Auth continua sendo a fonte de autenticacao.
+
+Modelos adicionados:
+
+- `ListInvite`: convite de acesso a lista por e-mail, com `role`, `status`, convidado, dono que convidou e timestamps.
+- `Notification`: notificacao interna por usuario, com tipo, titulo, mensagem, `readAt` opcional e `metadata` JSON.
+- `ListInviteStatus`: `PENDING`, `ACCEPTED`, `DECLINED`, `EXPIRED`, `CANCELED`.
+- `NotificationType`: eventos de convite, acesso removido e alteracoes colaborativas.
+
+Endpoints de convites:
+
+- `GET /api/invites`
+- `GET /api/lists/:listId/invites`
+- `POST /api/lists/:listId/invites`
+- `POST /api/invites/:inviteId/accept`
+- `POST /api/invites/:inviteId/decline`
+- `DELETE /api/invites/:inviteId`
+
+Endpoints de notificacoes:
+
+- `GET /api/notifications`
+- `PATCH /api/notifications/:id/read`
+- `PATCH /api/notifications/read-all`
+
+Regras implementadas:
+
+- Somente `OWNER` pode criar/cancelar convites de uma lista.
+- O convidado pode aceitar ou recusar convites pendentes recebidos por `invitedUserId` ou pelo mesmo e-mail da conta Supabase.
+- Aceitar convite cria/atualiza `SharedListAccess`.
+- Recusar/cancelar altera o status do convite; convites nao sao apagados.
+- Convites duplicados pendentes para a mesma lista/e-mail sao bloqueados.
+- Nao e permitido convidar o proprio dono nem usuario que ja tem acesso.
+- Notificacoes sao geradas ao receber, aceitar, recusar ou cancelar convites/acessos.
+- O menu exibe badges para convites pendentes e notificacoes nao lidas.
+
+Realtime:
+
+- A estrategia escolhida foi Supabase Realtime Broadcast no frontend, com canal `list:{listId}`.
+- Eventos enviados: `product:created`, `product:updated`, `product:deleted`, `product:purchased`, `list:updated`, `list:access-changed`.
+- O payload do Broadcast nao contem dados sensiveis; envia apenas `listId` e `eventType`.
+- Ao receber evento, o cliente nao confia no payload e recarrega listas/produtos/historico pela API protegida.
+- Um debounce simples evita multiplos reloads em sequencia.
+- Presence tambem foi ativado no canal da lista para mostrar quantos usuarios estao online.
+
+Limitacoes conhecidas:
+
+- A autorizacao fina do Broadcast/Presence depende de policies Supabase em `realtime.messages`; nesta fase o app evita expor dados sensiveis no evento e usa a API protegida para recarregar dados.
+- O backend serverless nao emite Broadcast diretamente; o frontend emite o evento somente apos resposta bem-sucedida da API.
+- Notificacoes de produto por usuario nao sao geradas a cada edicao para evitar spam. A sincronizacao de produto e feita via Realtime.
+
+RLS recomendada:
+
+- `shared_list_access`: permitir leitura apenas quando `userId = auth.uid()` ou quando o usuario e dono da lista relacionada.
+- `list_invites`: permitir leitura quando `invitedUserId = auth.uid()`, `invitedEmail` corresponde ao e-mail autenticado ou o usuario e dono da lista.
+- `notifications`: permitir leitura/update apenas quando `userId = auth.uid()`.
+- `realtime.messages`: habilitar Broadcast/Presence apenas para usuarios autenticados e, idealmente, validar o topico `list:{listId}` contra ownership ou `shared_list_access`.
+
+Como testar colaboracao:
+
+1. Usuario A cria uma lista.
+2. Usuario A abre "Compartilhar" e convida o Usuario B como `VIEWER`.
+3. Usuario B entra em "Convites", aceita e ve a lista em "Compartilhadas comigo".
+4. Usuario B deve visualizar sem editar.
+5. Usuario A convida Usuario C como `EDITOR`.
+6. Usuario C edita/adiciona/marca produto.
+7. Usuario A, com a lista aberta, recebe aviso de atualizacao e os dados sao recarregados pela API.
+8. Validar que APIs sem token retornam `401` e sem permissao retornam `403`.
+
 Seguranca e RLS:
 
 - Nunca configure `SUPABASE_SERVICE_ROLE_KEY` no frontend.

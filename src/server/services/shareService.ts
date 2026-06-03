@@ -2,6 +2,7 @@ import type { ListAccessRole } from "@prisma/client";
 import { requireListOwner, resolveListId, resolveUserId } from "../auth/listPermissions";
 import { AppError } from "../errors";
 import * as shareRepository from "../repositories/shareRepository";
+import { createNotification } from "./notificationService";
 
 export type SharePayload = {
   userId?: unknown;
@@ -38,6 +39,12 @@ export async function createShare(listId: unknown, payload: SharePayload) {
   }
 
   const share = await shareRepository.createShare(list.id, targetUser.id, role);
+  await createNotification(targetUser.id, {
+    type: "LIST_INVITE_ACCEPTED",
+    title: "Lista compartilhada com voce",
+    message: `${currentUser.name} compartilhou uma lista com permissao de ${role === "EDITOR" ? "editor" : "visualizador"}.`,
+    metadata: { listId: list.id, role }
+  });
   return mapShare(share);
 }
 
@@ -66,6 +73,12 @@ export async function deleteShare(listId: unknown, shareId: unknown, userId: unk
   }
 
   await shareRepository.deleteShare(existing.id);
+  await createNotification(existing.userId, {
+    type: "LIST_SHARED_ACCESS_REMOVED",
+    title: "Acesso removido",
+    message: "Seu acesso a uma lista compartilhada foi removido.",
+    metadata: { listId: list.id }
+  });
   return { id: existing.id };
 }
 
