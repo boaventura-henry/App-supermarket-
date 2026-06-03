@@ -387,6 +387,8 @@ export function App() {
     }
 
     void refreshCollaborationInbox();
+    // A rotina de refresh usa o usuario autenticado atual e nao deve reabrir inbox a cada render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
   useEffect(() => {
@@ -395,7 +397,7 @@ export function App() {
       return;
     }
 
-    let refreshTimer: ReturnType<typeof window.setTimeout> | null = null;
+    let refreshTimer: number | null = null;
     const unsubscribe = subscribeToList(selectedListId, {
       userId: currentUser.uid,
       userName: currentUser.name,
@@ -417,6 +419,8 @@ export function App() {
       }
       unsubscribe();
     };
+    // A assinatura realtime e controlada por usuario/lista; o refresh interno apenas sincroniza o snapshot remoto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, selectedListId]);
 
   useEffect(() => {

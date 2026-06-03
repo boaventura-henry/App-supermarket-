@@ -15,12 +15,13 @@ type ListSubscriptionCallbacks = {
   onPresenceChange?: (count: number) => void;
 };
 
-export function subscribeToList(listId: string, callbacks: ListSubscriptionCallbacks) {
+export function subscribeToList(listId: string, callbacks: ListSubscriptionCallbacks): () => void {
   if (!supabase || !isSupabaseConfigured) {
-    return () => undefined;
+    return () => {};
   }
 
-  const channel = supabase.channel(`list:${listId}`, {
+  const supabaseClient = supabase;
+  const channel = supabaseClient.channel(`list:${listId}`, {
     config: {
       broadcast: { self: false },
       presence: { key: callbacks.userId }
@@ -50,25 +51,39 @@ export function subscribeToList(listId: string, callbacks: ListSubscriptionCallb
 
   return () => {
     void channel.untrack();
-    void supabase.removeChannel(channel);
+    void supabaseClient.removeChannel(channel);
   };
 }
 
-export async function broadcastListEvent(listId: string, event: ListRealtimeEvent) {
+export async function broadcastListEvent(listId: string, event: ListRealtimeEvent): Promise<void> {
   if (!supabase || !isSupabaseConfigured) {
     return;
   }
 
-  const channel = supabase.channel(`list:${listId}`);
-  await channel.subscribe(async (status) => {
-    if (status === "SUBSCRIBED") {
-      await channel.send({
-        type: "broadcast",
-        event: "list-event",
-        payload: { listId, eventType: event }
-      });
-      await supabase.removeChannel(channel);
-    }
+  const supabaseClient = supabase;
+  await new Promise<void>((resolve) => {
+    const channel = supabaseClient.channel(`list:${listId}`);
+    const cleanup = () => {
+      void supabaseClient.removeChannel(channel);
+      resolve();
+    };
+
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        channel
+          .send({
+            type: "broadcast",
+            event: "list-event",
+            payload: { listId, eventType: event }
+          })
+          .then(cleanup)
+          .catch(cleanup);
+      }
+
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        cleanup();
+      }
+    });
   });
 }
 
