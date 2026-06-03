@@ -33,6 +33,12 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Validate Prisma schema
+        run: npm run prisma:validate
+        env:
+          DATABASE_URL: postgresql://user:password@localhost:5432/superlist
+          DIRECT_URL: postgresql://user:password@localhost:5432/superlist
+
       - name: Run lint
         run: npm run lint
 

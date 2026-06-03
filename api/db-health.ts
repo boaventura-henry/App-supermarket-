@@ -1,4 +1,4 @@
-import { prisma } from "../server/prisma";
+import { prisma } from "../src/server/prisma";
 
 type ApiRequest = {
   method?: string;
