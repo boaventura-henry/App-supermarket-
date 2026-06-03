@@ -82,10 +82,14 @@ export function readLocalDatabaseSnapshot() {
 }
 
 export function getUserData(database: AppDatabase, userId: string) {
+  const lists = database.lists.filter((list) => list.userId === userId || Boolean(list.accessRole && list.accessRole !== "OWNER"));
+  const visibleListIds = new Set(lists.map((list) => list.id));
   return {
-    lists: database.lists.filter((list) => list.userId === userId),
-    products: database.products.filter((product) => product.userId === userId),
-    priceHistory: database.priceHistory.filter((history) => history.userId === userId)
+    lists,
+    products: database.products.filter((product) => product.userId === userId || visibleListIds.has(product.listId)),
+    priceHistory: database.priceHistory.filter(
+      (history) => history.userId === userId || Boolean(history.listId && visibleListIds.has(history.listId))
+    )
   };
 }
 

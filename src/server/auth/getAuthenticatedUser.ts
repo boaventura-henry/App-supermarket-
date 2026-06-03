@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { ApiRequest } from "../../../api/_utils";
 import { AppError } from "../errors";
+import { prisma } from "../prisma";
 
 export type AuthenticatedUser = {
   id: string;
@@ -41,11 +42,14 @@ export async function getAuthenticatedUser(request: ApiRequest): Promise<Authent
     throw new AppError(401, "Token Supabase invalido.");
   }
 
-  return {
+  const authenticatedUser = {
     id: data.user.id,
     email: data.user.email ?? "",
     name: typeof data.user.user_metadata?.name === "string" ? data.user.user_metadata.name : data.user.email ?? "Usuario"
   };
+  await ensureAppUser(authenticatedUser);
+
+  return authenticatedUser;
 }
 
 export async function getAuthenticatedUserOrNull(request: ApiRequest) {
@@ -60,4 +64,31 @@ export async function getAuthenticatedUserOrNull(request: ApiRequest) {
 function getHeader(request: ApiRequest, name: string) {
   const value = request.headers?.[name] ?? request.headers?.[name.toLowerCase()] ?? request.headers?.[name.toUpperCase()];
   return Array.isArray(value) ? value[0] : value;
+}
+
+async function ensureAppUser(user: AuthenticatedUser) {
+  const existing = await prisma.user.findFirst({
+    where: {
+      OR: [{ id: user.id }, { email: user.email }]
+    },
+    select: { id: true }
+  });
+
+  if (existing) {
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: existing.id === user.id ? { email: user.email, name: user.name } : { email: user.email, name: user.name, legacyId: user.id }
+    });
+    return;
+  }
+
+  await prisma.user.create({
+    data: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      passwordHash: "supabase-auth",
+      securityAnswerHash: "supabase-auth"
+    }
+  });
 }

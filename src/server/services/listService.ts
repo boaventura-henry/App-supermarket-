@@ -1,5 +1,6 @@
 import { AppError } from "../errors";
 import * as listRepository from "../repositories/listRepository";
+import { requireListOwner } from "../auth/listPermissions";
 
 export type ListPayload = {
   userId?: unknown;
@@ -9,19 +10,20 @@ export type ListPayload = {
 
 export async function getLists(userId: unknown) {
   const dbUser = await requireUser(userId);
-  return listRepository.findAllByUser(dbUser.id);
+  const lists = await listRepository.findAllByUser(dbUser.id);
+  return lists.map((list) => mapList(list, dbUser.id));
 }
 
 export async function getList(id: unknown, userId: unknown) {
   const listId = requireString(id, "Informe o id da lista.");
   const dbUser = await requireUser(userId);
-  const list = await listRepository.findById(listId, dbUser.id);
+  const list = await listRepository.findAccessibleById(listId, dbUser.id);
 
   if (!list) {
     throw new AppError(404, "Lista nao encontrada");
   }
 
-  return list;
+  return mapList(list, dbUser.id);
 }
 
 export async function createList(payload: ListPayload) {
@@ -29,16 +31,18 @@ export async function createList(payload: ListPayload) {
   const name = requireString(payload.name, "Informe o nome da lista.");
   const color = normalizeColor(payload.color);
 
-  return listRepository.create({
+  const list = await listRepository.create({
     userId: dbUser.id,
     name,
     color
   });
+  return mapList(list, dbUser.id);
 }
 
 export async function updateList(id: unknown, payload: ListPayload) {
   const listId = requireString(id, "Informe o id da lista.");
   const dbUser = await requireUser(payload.userId);
+  await requireListOwner(dbUser.id, listId);
   const data = {
     ...(payload.name !== undefined ? { name: requireString(payload.name, "Informe o nome da lista.") } : {}),
     ...(payload.color !== undefined ? { color: normalizeColor(payload.color) } : {})
@@ -53,12 +57,13 @@ export async function updateList(id: unknown, payload: ListPayload) {
     throw new AppError(404, "Lista nao encontrada");
   }
 
-  return list;
+  return mapList(list, dbUser.id);
 }
 
 export async function deleteList(id: unknown, userId: unknown) {
   const listId = requireString(id, "Informe o id da lista.");
   const dbUser = await requireUser(userId);
+  await requireListOwner(dbUser.id, listId);
   const removed = await listRepository.remove(listId, dbUser.id);
 
   if (!removed) {
@@ -66,6 +71,24 @@ export async function deleteList(id: unknown, userId: unknown) {
   }
 
   return { id: removed.id };
+}
+
+function mapList(list: Awaited<ReturnType<typeof listRepository.findAllByUser>>[number], currentUserId: string) {
+  const shared = list.sharedAccess.find((access) => access.userId === currentUserId);
+  const accessRole = list.userId === currentUserId ? "OWNER" : shared?.role ?? "VIEWER";
+  return {
+    id: list.legacyId ?? list.id,
+    remoteId: list.id,
+    legacyId: list.legacyId,
+    userId: list.user.legacyId ?? list.userId,
+    name: list.name,
+    color: list.color,
+    createdAt: list.createdAt,
+    updatedAt: list.updatedAt,
+    accessRole,
+    ownerName: list.user.name,
+    ownerEmail: list.user.email
+  };
 }
 
 async function requireUser(userId: unknown) {

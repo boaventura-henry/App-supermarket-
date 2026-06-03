@@ -14,6 +14,8 @@ export type AppUser = {
   createdAt: string;
 };
 
+export type ListAccessRole = "OWNER" | "EDITOR" | "VIEWER";
+
 export type PasskeyCredential = {
   id: string;
   userId: string;
@@ -45,6 +47,20 @@ export type ShoppingList = {
   color: string;
   createdAt: number;
   updatedAt: number;
+  accessRole?: ListAccessRole;
+  ownerName?: string;
+  ownerEmail?: string;
+};
+
+export type SharedListAccess = {
+  id: string;
+  listId: string;
+  userId: string;
+  role: Exclude<ListAccessRole, "OWNER">;
+  name: string;
+  email: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type PriceHistory = {

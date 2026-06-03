@@ -4,12 +4,16 @@ export const USE_REMOTE_LISTS = import.meta.env.VITE_USE_REMOTE_LISTS === "true"
 
 export type RemoteShoppingList = {
   id: string;
+  remoteId?: string;
   legacyId: string | null;
   userId: string;
   name: string;
   color: string;
   createdAt: string;
   updatedAt: string;
+  accessRole?: "OWNER" | "EDITOR" | "VIEWER";
+  ownerName?: string;
+  ownerEmail?: string;
 };
 
 export type ListPayload = {

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { AppError } from "../errors";
 import { createAutoPriceHistory } from "./priceHistoryService";
+import { requireListEditor, requireListViewer } from "../auth/listPermissions";
 import * as productRepository from "../repositories/productRepository";
 import type { ListRecord, ProductRecord, ProductUpdateInput } from "../repositories/productRepository";
 
@@ -15,19 +16,21 @@ export type ProductPayload = {
 };
 
 export async function getProducts(listId: unknown, userId: unknown) {
-  await requireUser(userId);
+  const user = await requireUser(userId);
   const list = await requireList(listId);
+  await requireListViewer(user.id, list.id);
   const products = await productRepository.findAllByList(list.id);
   return products.map(mapProduct);
 }
 
 export async function createProduct(listId: unknown, payload: ProductPayload) {
   const user = await requireUser(payload.userId);
-  const list = await requireListOwner(listId, user.id);
+  const list = await requireList(listId);
+  await requireListEditor(user.id, list.id);
   const name = requireString(payload.name, "Informe a descricao do produto.");
   const quantity = parseOptionalDecimal(payload.quantity, "Informe uma quantidade valida ou deixe em branco.", 3);
   const unitPrice = parseOptionalDecimal(payload.unitPrice, "Informe um valor unitario valido ou deixe em branco.", 2);
-  const sortOrder = await productRepository.nextSortOrder(list.id, user.id);
+  const sortOrder = await productRepository.nextSortOrder(list.id);
 
   const product = await productRepository.create({
     userId: user.id,
@@ -59,7 +62,7 @@ export async function createProduct(listId: unknown, payload: ProductPayload) {
 export async function updateProduct(id: unknown, payload: ProductPayload) {
   const productId = requireString(id, "Informe o id do produto.");
   const user = await requireUser(payload.userId);
-  const current = await requireProductOwner(productId, user.id);
+  const current = await requireProductEditor(productId, user.id);
   const data: ProductUpdateInput = {};
 
   if (payload.name !== undefined) {
@@ -108,7 +111,7 @@ export async function updateProduct(id: unknown, payload: ProductPayload) {
 export async function deleteProduct(id: unknown, userId: unknown) {
   const productId = requireString(id, "Informe o id do produto.");
   const user = await requireUser(userId);
-  const product = await requireProductOwner(productId, user.id);
+  const product = await requireProductEditor(productId, user.id);
   await productRepository.remove(product.id);
   return { id: product.id };
 }
@@ -116,7 +119,7 @@ export async function deleteProduct(id: unknown, userId: unknown) {
 export async function updatePurchasedStatus(id: unknown, payload: ProductPayload) {
   const productId = requireString(id, "Informe o id do produto.");
   const user = await requireUser(payload.userId);
-  const product = await requireProductOwner(productId, user.id);
+  const product = await requireProductEditor(productId, user.id);
   const purchased = requireBoolean(payload.purchased, "Informe o status de comprado.");
   const updated = await productRepository.updatePurchasedStatus(product.id, purchased);
   return mapProduct(updated);
@@ -144,23 +147,12 @@ async function requireList(listId: unknown): Promise<ListRecord> {
   return list;
 }
 
-async function requireListOwner(listId: unknown, userId: string) {
-  const list = await requireList(listId);
-  if (list.userId !== userId) {
-    throw new AppError(403, "Somente o criador da lista pode alterar.");
-  }
-
-  return list;
-}
-
-async function requireProductOwner(productId: string, userId: string) {
+async function requireProductEditor(productId: string, userId: string) {
   const product = await productRepository.findById(productId);
   if (!product) {
     throw new AppError(404, "Produto nao encontrado.");
   }
-  if (product.list.userId !== userId) {
-    throw new AppError(403, "Somente o criador da lista pode alterar.");
-  }
+  await requireListEditor(userId, product.listId);
 
   return product;
 }

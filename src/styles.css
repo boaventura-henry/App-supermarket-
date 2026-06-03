@@ -356,6 +356,14 @@
     @apply block truncate text-base font-black;
   }
 
+  .list-card-title-row {
+    @apply flex min-w-0 items-center justify-between gap-2;
+  }
+
+  .role-pill {
+    @apply shrink-0 rounded-full bg-supermarket-mint px-2 py-0.5 text-[0.65rem] font-black uppercase text-supermarket-leaf;
+  }
+
   .list-card-actions {
     @apply flex w-full items-center justify-end gap-2 border-t border-supermarket-ink/10 pt-3;
   }
@@ -616,6 +624,31 @@
     @apply max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-[2rem] bg-white p-5 shadow-[0_24px_80px_rgba(0,0,0,0.35)];
   }
 
+  .share-modal {
+    @apply max-w-2xl;
+  }
+
+  .share-list {
+    @apply grid gap-3;
+  }
+
+  .share-row {
+    @apply grid gap-3 rounded-2xl border border-supermarket-ink/10 bg-supermarket-paper/70 p-3 sm:grid-cols-[1fr_150px_auto] sm:items-center;
+  }
+
+  .share-row strong,
+  .share-row small {
+    @apply block truncate;
+  }
+
+  .share-row small {
+    @apply text-sm font-semibold text-supermarket-ink/55;
+  }
+
+  .share-role-select {
+    @apply h-10 rounded-xl px-3 text-sm font-bold;
+  }
+
   .shared-list-row {
     @apply flex items-center gap-3 rounded-2xl border border-supermarket-ink/10 bg-white px-4 py-3 shadow-soft;
   }
@@ -674,6 +707,7 @@
   .theme-dark .compact-product-row,
   .theme-dark .product-modal,
   .theme-dark .shared-list-row,
+  .theme-dark .share-row,
   .theme-dark .product-row,
   .theme-dark .history-row,
   .theme-dark .chart-shell {
@@ -699,6 +733,7 @@
 
   .theme-dark .bg-supermarket-mint,
   .theme-dark .passkey-icon,
+  .theme-dark .role-pill,
   .theme-dark .chart-chip {
     background: rgba(109, 247, 167, 0.16);
   }
@@ -751,6 +786,7 @@
   .theme-dark .passkey-banner p,
   .theme-dark .shopping-list-card small,
   .theme-dark .shared-list-row small,
+  .theme-dark .share-row small,
   .theme-dark .history-row small,
   .theme-dark .product-grid-footer,
   .theme-dark .empty-chart {
@@ -785,6 +821,7 @@
 
   .theme-dark .home-bar-row span,
   .theme-dark .chart-chip,
+  .theme-dark .role-pill,
   .theme-dark .sort-indicator-active {
     background: rgba(109, 247, 167, 0.16);
   }
@@ -947,6 +984,7 @@
   .theme-dark .compact-product-row,
   .theme-dark .compact-product-list,
   .theme-dark .shared-list-row,
+  .theme-dark .share-row,
   .theme-dark .home-bar-row,
   .theme-dark .product-grid-footer,
   .theme-dark .bulk-clear-option,

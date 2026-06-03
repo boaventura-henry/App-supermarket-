@@ -33,13 +33,29 @@ export async function findUserByIdOrLegacyId(userId: string) {
 
 export async function findAllByUser(userId: string) {
   return prisma.shoppingList.findMany({
-    where: { userId },
+    where: {
+      OR: [{ userId }, { sharedAccess: { some: { userId } } }]
+    },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     select: listSelect()
   });
 }
 
-export async function findById(id: string, userId: string) {
+export async function findAccessibleById(id: string, userId: string) {
+  return prisma.shoppingList.findFirst({
+    where: {
+      AND: [
+        { OR: idFilter(id) },
+        {
+          OR: [{ userId }, { sharedAccess: { some: { userId } } }]
+        }
+      ]
+    },
+    select: listSelect()
+  });
+}
+
+export async function findOwnedById(id: string, userId: string) {
   return prisma.shoppingList.findFirst({
     where: {
       userId,
@@ -108,6 +124,19 @@ function listSelect() {
     name: true,
     color: true,
     createdAt: true,
-    updatedAt: true
+    updatedAt: true,
+    user: {
+      select: {
+        name: true,
+        email: true,
+        legacyId: true
+      }
+    },
+    sharedAccess: {
+      select: {
+        userId: true,
+        role: true
+      }
+    }
   } as const;
 }

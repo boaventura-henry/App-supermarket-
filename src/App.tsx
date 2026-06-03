@@ -18,6 +18,7 @@ import {
   RefreshCcw,
   Save,
   Search,
+  Share2,
   ShieldCheck,
   ShoppingBasket,
   ShoppingCart,
@@ -37,13 +38,21 @@ import {
   saveDatabase,
   sortByNewest
 } from "./storage";
-import type { AppDatabase, PriceHistory, Product, ShoppingList, User, View } from "./types";
+import type { AppDatabase, ListAccessRole, PriceHistory, Product, SharedListAccess, ShoppingList, User, View } from "./types";
 import {
   createPasskeyForUser,
   describePasskeyError,
   getPasskeyAssertion,
   getPasskeySupport
 } from "./webauthn";
+import {
+  USE_REMOTE_LISTS,
+  createList as createRemoteList,
+  deleteList as deleteRemoteList,
+  getLists as getRemoteLists,
+  updateList as updateRemoteList,
+  type RemoteShoppingList
+} from "./services/listApi";
 import {
   USE_REMOTE_PRODUCTS,
   createProduct as createRemoteProduct,
@@ -62,6 +71,13 @@ import {
   importLocalData,
   type MigrationResult
 } from "./services/migrationApi";
+import {
+  createShare,
+  deleteShare,
+  getShares,
+  updateShare,
+  type ShareRole
+} from "./services/shareApi";
 import {
   USE_SUPABASE_AUTH,
   getCurrentSession,
@@ -174,6 +190,45 @@ function productToEditDraft(product: Product): ProductEditDraft {
   };
 }
 
+function getListAccessRole(list: ShoppingList, currentUserId: string): ListAccessRole {
+  return list.accessRole ?? (list.userId === currentUserId ? "OWNER" : "VIEWER");
+}
+
+function canManageList(list: ShoppingList, currentUserId: string) {
+  return getListAccessRole(list, currentUserId) === "OWNER";
+}
+
+function canEditListProducts(list: ShoppingList, currentUserId: string) {
+  const role = getListAccessRole(list, currentUserId);
+  return role === "OWNER" || role === "EDITOR";
+}
+
+function listRoleLabel(role: ListAccessRole) {
+  if (role === "OWNER") {
+    return "Dono";
+  }
+  if (role === "EDITOR") {
+    return "Editor";
+  }
+  return "Visualizador";
+}
+
+function toLocalShoppingList(list: RemoteShoppingList): ShoppingList {
+  const createdAt = Date.parse(list.createdAt);
+  const updatedAt = Date.parse(list.updatedAt);
+  return {
+    id: list.id,
+    userId: list.userId,
+    name: list.name,
+    color: list.color,
+    createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
+    updatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now(),
+    accessRole: list.accessRole,
+    ownerName: list.ownerName,
+    ownerEmail: list.ownerEmail
+  };
+}
+
 function authUserToLocalUser(user: AuthUser): User {
   return {
     uid: user.id,
@@ -281,6 +336,28 @@ export function App() {
   }, [currentUser, database]);
 
   useEffect(() => {
+    if (!USE_REMOTE_LISTS || !currentUser) {
+      return;
+    }
+
+    let isMounted = true;
+    getRemoteLists(currentUser.uid)
+      .then((lists) => {
+        if (!isMounted) {
+          return;
+        }
+        setDatabase((current) => replaceVisibleLists(current, currentUser.uid, lists.map(toLocalShoppingList)));
+      })
+      .catch((error) => {
+        console.error("Nao foi possivel carregar listas remotas.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
+
+  useEffect(() => {
     if (!USE_REMOTE_PRODUCTS || !currentUser || !selectedListId) {
       return;
     }
@@ -370,18 +447,21 @@ export function App() {
     };
   }
 
+  function replaceVisibleLists(current: AppDatabase, userId: string, lists: ShoppingList[]) {
+    return {
+      ...current,
+      lists: [
+        ...current.lists.filter((list) => list.userId !== userId && !list.accessRole),
+        ...lists
+      ]
+    };
+  }
+
   function upsertProduct(current: AppDatabase, product: Product) {
     const exists = current.products.some((item) => item.id === product.id);
     return {
       ...current,
       products: exists ? current.products.map((item) => (item.id === product.id ? product : item)) : [...current.products, product]
-    };
-  }
-
-  function removeProduct(current: AppDatabase, productId: string, userId: string) {
-    return {
-      ...current,
-      products: current.products.filter((product) => !(product.id === productId && product.userId === userId))
     };
   }
 
@@ -623,6 +703,35 @@ export function App() {
 
     const now = Date.now();
     const targetListId = editingListId && editingListId !== "new" ? editingListId : createId("list");
+    if (USE_REMOTE_LISTS) {
+      if (editingListId && editingListId !== "new") {
+        const existing = database.lists.find((list) => list.id === editingListId);
+        if (!existing || !canManageList(existing, currentUser.uid)) {
+          throw new Error("Somente o dono da lista pode alterar.");
+        }
+        void updateRemoteList(existing.id, { userId: currentUser.uid, name, color: form.color })
+          .then((remoteList) => {
+            setDatabase((current) => ({
+              ...current,
+              lists: current.lists.map((list) => (list.id === existing.id ? toLocalShoppingList(remoteList) : list))
+            }));
+          })
+          .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar a lista remota."));
+        setEditingListId(null);
+        return;
+      }
+
+      void createRemoteList({ userId: currentUser.uid, name, color: form.color })
+        .then((remoteList) => {
+          const localList = toLocalShoppingList(remoteList);
+          setDatabase((current) => ({ ...current, lists: [...current.lists, localList] }));
+          setSelectedListId(localList.id);
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel criar a lista remota."));
+      setEditingListId(null);
+      return;
+    }
+
     updateDatabase((current) => {
       const existing = editingListId
         ? current.lists.find((list) => list.id === editingListId && list.userId === currentUser.uid)
@@ -652,6 +761,26 @@ export function App() {
     if (!currentUser) {
       return;
     }
+    const target = database.lists.find((list) => list.id === listId);
+    if (USE_REMOTE_LISTS) {
+      if (!target || !canManageList(target, currentUser.uid)) {
+        window.alert("Somente o dono da lista pode excluir.");
+        return;
+      }
+      void deleteRemoteList(listId, currentUser.uid)
+        .then(() => {
+          updateDatabase((current) => ({
+            ...current,
+            lists: current.lists.filter((list) => list.id !== listId),
+            products: current.products.filter((product) => product.listId !== listId),
+            priceHistory: current.priceHistory.filter((history) => history.listId !== listId)
+          }));
+          setSelectedListId((current) => (current === listId ? null : current));
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel excluir a lista remota."));
+      setEditingListId(null);
+      return;
+    }
     updateDatabase((current) => ({
       ...current,
       lists: current.lists.filter((list) => !(list.id === listId && list.userId === currentUser.uid)),
@@ -666,8 +795,9 @@ export function App() {
     if (!currentUser) {
       return;
     }
-    if (!database.lists.some((list) => list.id === listId && list.userId === currentUser.uid)) {
-      throw new Error("Somente o criador da lista pode alterar.");
+    const targetList = database.lists.find((list) => list.id === listId);
+    if (!targetList || !canEditListProducts(targetList, currentUser.uid)) {
+      throw new Error("Voce nao tem permissao para editar produtos desta lista.");
     }
     const name = form.name.trim();
     if (!name) {
@@ -786,17 +916,33 @@ export function App() {
       return;
     }
     if (USE_REMOTE_PRODUCTS) {
+      const target = database.products.find((product) => product.id === productId);
+      const targetList = target ? database.lists.find((list) => list.id === target.listId) : null;
+      if (!targetList || !canEditListProducts(targetList, currentUser.uid)) {
+        window.alert("Voce nao tem permissao para excluir este produto.");
+        return;
+      }
       void deleteRemoteProduct(productId, currentUser.uid)
         .then(() => {
-          updateDatabase((current) => removeProduct(current, productId, currentUser.uid));
+          updateDatabase((current) => ({
+            ...current,
+            products: current.products.filter((product) => product.id !== productId)
+          }));
         })
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel excluir o produto."));
       return;
     }
-    updateDatabase((current) => ({
-      ...current,
-      products: current.products.filter((product) => !(product.id === productId && product.userId === currentUser.uid))
-    }));
+    updateDatabase((current) => {
+      const target = current.products.find((product) => product.id === productId);
+      const targetList = target ? current.lists.find((list) => list.id === target.listId) : null;
+      if (!targetList || !canEditListProducts(targetList, currentUser.uid)) {
+        return current;
+      }
+      return {
+        ...current,
+        products: current.products.filter((product) => product.id !== productId)
+      };
+    });
   }
 
   function toggleBought(productId: string) {
@@ -804,8 +950,9 @@ export function App() {
       return;
     }
     if (USE_REMOTE_PRODUCTS) {
-      const target = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
-      if (!target) {
+      const target = database.products.find((product) => product.id === productId);
+      const targetList = target ? database.lists.find((list) => list.id === target.listId) : null;
+      if (!target || !targetList || !canEditListProducts(targetList, currentUser.uid)) {
         return;
       }
       void toggleRemotePurchased(productId, currentUser.uid, !target.isBought)
@@ -815,14 +962,19 @@ export function App() {
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar o status do produto."));
       return;
     }
-    updateDatabase((current) => ({
-      ...current,
-      products: current.products.map((product) =>
-        product.id === productId && product.userId === currentUser.uid
-          ? { ...product, isBought: !product.isBought }
-          : product
-      )
-    }));
+    updateDatabase((current) => {
+      const target = current.products.find((product) => product.id === productId);
+      const targetList = target ? current.lists.find((list) => list.id === target.listId) : null;
+      if (!targetList || !canEditListProducts(targetList, currentUser.uid)) {
+        return current;
+      }
+      return {
+        ...current,
+        products: current.products.map((product) =>
+          product.id === productId ? { ...product, isBought: !product.isBought } : product
+        )
+      };
+    });
   }
 
   function saveProductInline(productId: string, draft: ProductEditDraft) {
@@ -843,8 +995,9 @@ export function App() {
     const timestamp = Date.now();
 
     if (USE_REMOTE_PRODUCTS) {
-      const target = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
-      if (!target) {
+      const target = database.products.find((product) => product.id === productId);
+      const targetList = target ? database.lists.find((list) => list.id === target.listId) : null;
+      if (!target || !targetList || !canEditListProducts(targetList, currentUser.uid)) {
         return;
       }
       void updateRemoteProduct(productId, {
@@ -885,7 +1038,7 @@ export function App() {
       return;
     }
 
-    const targetForRemoteHistory = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+    const targetForRemoteHistory = database.products.find((product) => product.id === productId);
     if (
       USE_REMOTE_PRICE_HISTORY &&
       targetForRemoteHistory &&
@@ -909,8 +1062,12 @@ export function App() {
     }
 
     updateDatabase((current) => {
-      const target = current.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+      const target = current.products.find((product) => product.id === productId);
       if (!target) {
+        return current;
+      }
+      const targetList = current.lists.find((list) => list.id === target.listId);
+      if (!targetList || !canEditListProducts(targetList, currentUser.uid)) {
         return current;
       }
 
@@ -953,6 +1110,10 @@ export function App() {
     if (!currentUser) {
       return;
     }
+    const targetList = database.lists.find((list) => list.id === listId);
+    if (!targetList || !canEditListProducts(targetList, currentUser.uid)) {
+      throw new Error("Voce nao tem permissao para limpar esta lista.");
+    }
 
     const shouldClear = Object.values(fields).some(Boolean);
     if (!shouldClear) {
@@ -961,7 +1122,7 @@ export function App() {
 
     const timestamp = Date.now();
     if (USE_REMOTE_PRODUCTS) {
-      const targets = database.products.filter((product) => product.userId === currentUser.uid && product.listId === listId);
+      const targets = database.products.filter((product) => product.listId === listId);
       void Promise.all(
         targets.map((product) =>
           updateRemoteProduct(product.id, {
@@ -985,7 +1146,7 @@ export function App() {
     updateDatabase((current) => ({
       ...current,
       products: current.products.map((product) => {
-        if (product.userId !== currentUser.uid || product.listId !== listId) {
+        if (product.listId !== listId) {
           return product;
         }
         return {
@@ -1100,8 +1261,8 @@ export function App() {
       {view === "shared" ? (
         <SharedLists
           users={database.users}
-          lists={database.lists}
-          products={database.products}
+          lists={userData.lists.filter((list) => getListAccessRole(list, currentUser.uid) !== "OWNER")}
+          products={userData.products}
           currentUserId={currentUser.uid}
           editingListId={editingListId}
           onEditList={setEditingListId}
@@ -1485,13 +1646,21 @@ function ShoppingList({
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [savedProductId, setSavedProductId] = useState<string | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const selectedList = selectedListId ? lists.find((list) => list.id === selectedListId) ?? null : null;
-  const isListOwner = selectedList ? selectedList.userId === currentUserId : true;
-  const readonlyReason = "Somente o criador da lista pode alterar.";
-  const creatorLabel = (userId: string) => {
-    const user = users.find((item) => item.uid === userId);
+  const selectedListRole = selectedList ? getListAccessRole(selectedList, currentUserId) : "OWNER";
+  const isListOwner = selectedListRole === "OWNER";
+  const canEditProducts = selectedList ? canEditListProducts(selectedList, currentUserId) : true;
+  const readonlyReason = "Voce tem acesso somente leitura nesta lista.";
+  const creatorLabel = (list: ShoppingList) => {
+    if (list.ownerName || list.ownerEmail) {
+      return [list.ownerName, list.ownerEmail].filter(Boolean).join(" - ");
+    }
+    const user = users.find((item) => item.uid === list.userId);
     return user ? `${user.name} - ${user.email}` : "Usuario local";
   };
+  const ownLists = lists.filter((list) => getListAccessRole(list, currentUserId) === "OWNER");
+  const sharedLists = lists.filter((list) => getListAccessRole(list, currentUserId) !== "OWNER");
   const getListSummary = (listId: string) => {
     const listItems = products.filter((product) => product.listId === listId);
     const bought = listItems.filter((product) => product.isBought).length;
@@ -1542,7 +1711,7 @@ function ShoppingList({
   const completionRate = listProducts.length > 0 ? Math.round((boughtCount / listProducts.length) * 100) : 0;
 
   function saveProductFromModal(form: ProductForm) {
-    if (!selectedList || !isListOwner) {
+    if (!selectedList || !canEditProducts) {
       return;
     }
     onSaveProduct(selectedList.id, form);
@@ -1550,7 +1719,7 @@ function ShoppingList({
   }
 
   function requestProductEdit(productId: string) {
-    if (!isListOwner) {
+    if (!canEditProducts) {
       return;
     }
     if (editingProductId && editingProductId !== productId) {
@@ -1564,7 +1733,7 @@ function ShoppingList({
   }
 
   function confirmProductEdit(productId: string, draft: ProductEditDraft) {
-    if (!isListOwner) {
+    if (!canEditProducts) {
       return;
     }
     onInlineChange(productId, draft);
@@ -1591,7 +1760,7 @@ function ShoppingList({
           ) : null}
         </div>
 
-        {editingListId && (editingListId === "new" || lists.some((list) => list.id === editingListId && list.userId === currentUserId)) ? (
+        {editingListId && (editingListId === "new" || lists.some((list) => list.id === editingListId && canManageList(list, currentUserId))) ? (
           <ListEditor
             list={editingListId === "new" ? null : lists.find((list) => list.id === editingListId) ?? null}
             onCancel={onCancelList}
@@ -1599,49 +1768,36 @@ function ShoppingList({
           />
         ) : null}
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="space-y-6">
           {lists.length === 0 ? (
             <EmptyState action={allowCreateList ? "Criar primeira lista" : undefined} onClick={allowCreateList ? onStartList : undefined} />
           ) : (
-            lists.map((list) => {
-              const summary = getListSummary(list.id);
-              const canEditList = list.userId === currentUserId;
-              return (
-                <article className="shopping-list-card" key={list.id}>
-                  <button className="shopping-list-card-main" type="button" onClick={() => onSelectList(list.id)}>
-                    <span className="list-color-dot" style={{ backgroundColor: list.color }} />
-                    <span className="min-w-0">
-                      <strong>{list.name}</strong>
-                      <small>
-                        {creatorLabel(list.userId)}
-                      </small>
-                      <small>
-                        {summary.count} {summary.count === 1 ? "item" : "itens"} - {summary.bought} comprados - {money(summary.total)}
-                      </small>
-                    </span>
-                  </button>
-                  {canEditList ? (
-                    <div className="list-card-actions">
-                      <button className="icon-button" type="button" onClick={() => onEditList(list.id)} aria-label="Editar lista">
-                        <Edit3 size={16} />
-                      </button>
-                      <button
-                        className="icon-button danger-icon-button"
-                        type="button"
-                        onClick={() => {
-                          if (window.confirm(`Excluir a lista "${list.name}"?`)) {
-                            onDeleteList(list.id);
-                          }
-                        }}
-                        aria-label="Excluir lista"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })
+            <>
+              {ownLists.length > 0 ? (
+                <ListCardSection
+                  title="Minhas listas"
+                  lists={ownLists}
+                  currentUserId={currentUserId}
+                  getListSummary={getListSummary}
+                  creatorLabel={creatorLabel}
+                  onSelectList={onSelectList}
+                  onEditList={onEditList}
+                  onDeleteList={onDeleteList}
+                />
+              ) : null}
+              {sharedLists.length > 0 ? (
+                <ListCardSection
+                  title="Compartilhadas comigo"
+                  lists={sharedLists}
+                  currentUserId={currentUserId}
+                  getListSummary={getListSummary}
+                  creatorLabel={creatorLabel}
+                  onSelectList={onSelectList}
+                  onEditList={onEditList}
+                  onDeleteList={onDeleteList}
+                />
+              ) : null}
+            </>
           )}
         </div>
       </section>
@@ -1657,7 +1813,7 @@ function ShoppingList({
             <p className="text-sm font-black uppercase text-supermarket-leaf">Lista</p>
             <h2 className="text-2xl font-black">{selectedList.name}</h2>
             <p className="text-sm text-supermarket-ink/60">
-              {creatorLabel(selectedList.userId)} - {listProducts.length} itens - {boughtCount} comprados - {money(total)}
+              {creatorLabel(selectedList)} - {listRoleLabel(selectedListRole)} - {listProducts.length} itens - {boughtCount} comprados - {money(total)}
             </p>
           </div>
         </div>
@@ -1666,6 +1822,12 @@ function ShoppingList({
             Voltar
           </button>
           {isListOwner ? (
+            <button className="button-secondary" type="button" onClick={() => setIsShareModalOpen(true)}>
+              <Share2 size={16} />
+              Compartilhar
+            </button>
+          ) : null}
+          {canEditProducts ? (
             <>
               <button className="button-secondary" type="button" onClick={() => setIsClearModalOpen(true)}>
                 <RefreshCcw size={16} />
@@ -1680,7 +1842,7 @@ function ShoppingList({
         </div>
       </div>
 
-      {!isListOwner ? <div className="readonly-banner">Visualizacao somente leitura. Apenas o criador pode alterar esta lista.</div> : null}
+      {!canEditProducts ? <div className="readonly-banner">Visualizacao somente leitura. O dono da lista concedeu acesso de visualizador.</div> : null}
 
       {isListOwner && editingListId ? (
         <ListEditor
@@ -1714,9 +1876,9 @@ function ShoppingList({
               <ProductGridRow
                 key={product.id}
                 product={product}
-                isEditing={isListOwner && editingProductId === product.id}
+                isEditing={canEditProducts && editingProductId === product.id}
                 isRecentlySaved={savedProductId === product.id}
-                readOnly={!isListOwner}
+                readOnly={!canEditProducts}
                 readOnlyReason={readonlyReason}
                 onRequestEdit={requestProductEdit}
                 onCancelEdit={() => setEditingProductId(null)}
@@ -1735,8 +1897,8 @@ function ShoppingList({
         </div>
       </div>
 
-      {isListOwner && isProductModalOpen ? <ProductModal onCancel={() => setIsProductModalOpen(false)} onSave={saveProductFromModal} /> : null}
-      {isListOwner && isClearModalOpen ? (
+      {canEditProducts && isProductModalOpen ? <ProductModal onCancel={() => setIsProductModalOpen(false)} onSave={saveProductFromModal} /> : null}
+      {canEditProducts && isClearModalOpen ? (
         <ClearFieldsModal
           onCancel={() => setIsClearModalOpen(false)}
           onConfirm={(fields) => {
@@ -1745,6 +1907,76 @@ function ShoppingList({
           }}
         />
       ) : null}
+      {isListOwner && isShareModalOpen ? <ShareListModal list={selectedList} onCancel={() => setIsShareModalOpen(false)} /> : null}
+    </section>
+  );
+}
+
+function ListCardSection({
+  title,
+  lists,
+  currentUserId,
+  getListSummary,
+  creatorLabel,
+  onSelectList,
+  onEditList,
+  onDeleteList
+}: {
+  title: string;
+  lists: ShoppingList[];
+  currentUserId: string;
+  getListSummary: (listId: string) => { count: number; bought: number; total: number };
+  creatorLabel: (list: ShoppingList) => string;
+  onSelectList: (listId: string) => void;
+  onEditList: (listId: string) => void;
+  onDeleteList: (listId: string) => void;
+}) {
+  return (
+    <section>
+      <h3 className="mb-3 text-sm font-black uppercase text-supermarket-leaf">{title}</h3>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {lists.map((list) => {
+          const summary = getListSummary(list.id);
+          const role = getListAccessRole(list, currentUserId);
+          const canEditList = role === "OWNER";
+          return (
+            <article className="shopping-list-card" key={list.id}>
+              <button className="shopping-list-card-main" type="button" onClick={() => onSelectList(list.id)}>
+                <span className="list-color-dot" style={{ backgroundColor: list.color }} />
+                <span className="min-w-0">
+                  <span className="list-card-title-row">
+                    <strong>{list.name}</strong>
+                    <small className="role-pill">{listRoleLabel(role)}</small>
+                  </span>
+                  <small>{creatorLabel(list)}</small>
+                  <small>
+                    {summary.count} {summary.count === 1 ? "item" : "itens"} - {summary.bought} comprados - {money(summary.total)}
+                  </small>
+                </span>
+              </button>
+              {canEditList ? (
+                <div className="list-card-actions">
+                  <button className="icon-button" type="button" onClick={() => onEditList(list.id)} aria-label="Editar lista">
+                    <Edit3 size={16} />
+                  </button>
+                  <button
+                    className="icon-button danger-icon-button"
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Excluir a lista "${list.name}"?`)) {
+                        onDeleteList(list.id);
+                      }
+                    }}
+                    aria-label="Excluir lista"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -2113,6 +2345,177 @@ function ClearFieldsModal({
   );
 }
 
+function ShareListModal({ list, onCancel }: { list: ShoppingList; onCancel: () => void }) {
+  const [shares, setShares] = useState<SharedListAccess[]>([]);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<ShareRole>("VIEWER");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    setIsLoading(true);
+    getShares(list.id)
+      .then((items) => {
+        if (isMounted) {
+          setShares(items);
+          setError("");
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setError(err instanceof Error ? err.message : "Nao foi possivel carregar compartilhamentos.");
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [list.id]);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) {
+      setError("Informe o e-mail do usuario.");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const share = await createShare(list.id, normalizedEmail, role);
+      setShares((current) => [...current.filter((item) => item.id !== share.id), share]);
+      setEmail("");
+      setRole("VIEWER");
+      setMessage("Lista compartilhada com sucesso.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel compartilhar a lista.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function changeRole(share: SharedListAccess, nextRole: ShareRole) {
+    setError("");
+    setMessage("");
+    try {
+      const updated = await updateShare(list.id, share.id, nextRole);
+      setShares((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setMessage("Permissao atualizada.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel atualizar a permissao.");
+    }
+  }
+
+  async function removeShare(share: SharedListAccess) {
+    if (!window.confirm(`Remover acesso de ${share.email}?`)) {
+      return;
+    }
+
+    setError("");
+    setMessage("");
+    try {
+      await deleteShare(list.id, share.id);
+      setShares((current) => current.filter((item) => item.id !== share.id));
+      setMessage("Compartilhamento removido.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel remover o compartilhamento.");
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
+      <form className="product-modal share-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="passkey-icon" aria-hidden="true">
+              <Share2 size={22} />
+            </div>
+            <div>
+              <p className="text-sm font-bold uppercase text-supermarket-leaf">Compartilhamento</p>
+              <h4 className="text-xl font-black">Compartilhar "{list.name}"</h4>
+              <p className="mt-1 text-sm font-semibold text-supermarket-ink/60">
+                Editor pode alterar produtos. Visualizador apenas consulta a lista.
+              </p>
+            </div>
+          </div>
+          <button className="icon-button" type="button" onClick={onCancel} aria-label="Fechar compartilhamento">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-[1fr_150px]">
+          <label className="field">
+            <span>E-mail do usuario</span>
+            <input
+              className="input"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="usuario@email.com"
+            />
+          </label>
+          <label className="field">
+            <span>Permissao</span>
+            <select className="input" value={role} onChange={(event) => setRole(event.target.value as ShareRole)}>
+              <option value="VIEWER">Visualizador</option>
+              <option value="EDITOR">Editor</option>
+            </select>
+          </label>
+        </div>
+
+        {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+        {message ? <p className="mt-4 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</p> : null}
+
+        <button className="button-primary mt-5 justify-center" type="submit" disabled={isSaving}>
+          <UserPlus size={18} />
+          {isSaving ? "Compartilhando..." : "Compartilhar lista"}
+        </button>
+
+        <div className="mt-6">
+          <h5 className="mb-3 text-sm font-black uppercase text-supermarket-ink/60">Usuarios com acesso</h5>
+          {isLoading ? (
+            <p className="text-sm font-semibold text-supermarket-ink/60">Carregando...</p>
+          ) : shares.length === 0 ? (
+            <p className="text-sm font-semibold text-supermarket-ink/60">Nenhum compartilhamento cadastrado.</p>
+          ) : (
+            <div className="share-list">
+              {shares.map((share) => (
+                <div className="share-row" key={share.id}>
+                  <div className="min-w-0">
+                    <strong>{share.name || share.email}</strong>
+                    <small>{share.email}</small>
+                  </div>
+                  <select
+                    className="input share-role-select"
+                    value={share.role}
+                    onChange={(event) => void changeRole(share, event.target.value as ShareRole)}
+                  >
+                    <option value="VIEWER">Visualizador</option>
+                    <option value="EDITOR">Editor</option>
+                  </select>
+                  <button className="icon-button danger-icon-button" type="button" onClick={() => void removeShare(share)} aria-label="Remover acesso">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function SortIndicator({ active, direction }: { active: boolean; direction: ProductSort["direction"] }) {
   return (
     <span className={active ? "sort-indicator sort-indicator-active" : "sort-indicator"} aria-hidden="true">
@@ -2243,8 +2646,8 @@ function SharedListsContent(props: {
       currentUserId={props.currentUserId}
       selectedListId={selectedSharedListId}
       editingListId={props.editingListId}
-      title="Outras listas"
-      description="Visualize listas de todos os usuarios cadastrados neste navegador."
+      title="Compartilhadas comigo"
+      description="Visualize listas que outros usuarios compartilharam com voce."
       allowCreateList={false}
       onSelectList={setSelectedSharedListId}
       onBackToLists={() => setSelectedSharedListId(null)}
@@ -2768,7 +3171,7 @@ function SideMenu({
             Lista
           </NavButton>
           <NavButton active={currentView === "shared"} onClick={() => onNavigate("shared")}>
-            Outras listas
+            Compartilhadas
           </NavButton>
           <NavButton active={currentView === "dashboard"} onClick={() => onNavigate("dashboard")}>
             Dashboard

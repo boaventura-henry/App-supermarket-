@@ -203,8 +203,8 @@ Fluxo implementado:
 
 APIs protegidas:
 
-- APIs de listas, produtos, historico e migracao preferem o usuario autenticado pelo JWT Supabase.
-- Sem header `Authorization`, elas ainda aceitam o `userId` antigo como compatibilidade temporaria.
+- APIs de listas, produtos, historico e migracao usam o usuario autenticado pelo JWT Supabase.
+- Sem header `Authorization`, as rotas protegidas retornam `401`.
 - Com token invalido, a API retorna `401`.
 - O endpoint `GET /api/me` e `PUT /api/me` exige JWT valido.
 
@@ -221,6 +221,46 @@ Passkeys/biometria:
 - O app nao armazena biometria.
 - WebAuthn/passkeys frontend-only ainda nao substituem a autenticacao forte backend com challenge validado no servidor.
 - Supabase Auth por e-mail/senha e o fluxo principal nesta fase.
+
+## Listas compartilhadas - fase 7
+
+Esta fase adiciona compartilhamento real de listas entre usuarios usando Supabase Postgres + Prisma no backend. O frontend continua preservando o `localStorage` como cache/fallback e nao muda a chave `app-supermarket-db-v2`.
+
+Modelo novo:
+
+- `SharedListAccess`: vincula `ShoppingList` e `User`.
+- `ListAccessRole`: `EDITOR` ou `VIEWER`.
+- O dono da lista e inferido por `ShoppingList.userId` e aparece no frontend como `OWNER`.
+
+Endpoints de compartilhamento:
+
+- `GET /api/lists/:listId/shares`
+- `POST /api/lists/:listId/shares`
+- `PUT /api/lists/:listId/shares/:shareId`
+- `DELETE /api/lists/:listId/shares/:shareId`
+
+Regras de permissao:
+
+- `OWNER`: gerencia lista, compartilha, altera/exclui lista e edita produtos.
+- `EDITOR`: visualiza a lista e cria/edita/exclui/marca produtos.
+- `VIEWER`: somente visualiza a lista e os produtos.
+- As APIs sempre validam o usuario autenticado por JWT Supabase e filtram por permissao.
+- O frontend separa "Minhas listas" e "Compartilhadas comigo" e mostra o papel de acesso.
+- A modal "Compartilhar" aparece apenas para o dono da lista.
+
+Arquivos principais:
+
+- `prisma/migrations/20260603003000_shared_list_access/migration.sql`
+- `src/server/auth/listPermissions.ts`
+- `src/server/repositories/shareRepository.ts`
+- `src/server/services/shareService.ts`
+- `api/lists/[listId]/shares/index.ts`
+- `api/lists/[listId]/shares/[shareId].ts`
+- `src/services/shareApi.ts`
+
+Realtime:
+
+- Supabase Realtime nao foi ativado nesta fase. As listas compartilhadas sao carregadas por chamadas HTTP quando as feature flags remotas estao ligadas. A sincronizacao em tempo real pode ser adicionada em uma fase posterior usando canais do Supabase filtrados por lista/usuario.
 
 Seguranca e RLS:
 

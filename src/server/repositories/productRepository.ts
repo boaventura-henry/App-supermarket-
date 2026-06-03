@@ -109,9 +109,9 @@ export async function findById(id: string) {
   });
 }
 
-export async function nextSortOrder(listId: string, userId: string) {
+export async function nextSortOrder(listId: string) {
   const maxProduct = await prisma.product.aggregate({
-    where: { listId, userId },
+    where: { listId },
     _max: { sortOrder: true }
   });
 

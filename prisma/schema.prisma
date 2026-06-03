@@ -21,8 +21,14 @@ model User {
   products           Product[]
   priceHistory       PriceHistory[]
   passkeys           PasskeyCredential[]
+  sharedListAccess   SharedListAccess[]
 
   @@map("users")
+}
+
+enum ListAccessRole {
+  VIEWER
+  EDITOR
 }
 
 model Profile {
@@ -46,9 +52,25 @@ model ShoppingList {
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   products  Product[]
   history   PriceHistory[]
+  sharedAccess SharedListAccess[]
 
   @@index([userId])
   @@map("shopping_lists")
+}
+
+model SharedListAccess {
+  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  listId    String         @db.Uuid
+  userId    String         @db.Uuid
+  role      ListAccessRole
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  list      ShoppingList   @relation(fields: [listId], references: [id], onDelete: Cascade)
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, userId])
+  @@index([userId])
+  @@map("shared_list_access")
 }
 
 model Product {
