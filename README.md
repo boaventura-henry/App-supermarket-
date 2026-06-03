@@ -28,12 +28,16 @@ Arquivos principais:
 - `api/db-health.ts`: endpoint inicial de health check de banco para Vercel Serverless Functions.
 - `api/lists`: endpoints serverless para gerenciamento de listas via Prisma.
 - `api/products`: endpoints serverless para gerenciamento de produtos via Prisma.
+- `api/price-history`: endpoints serverless para historico de precos via Prisma.
 - `src/server/repositories/listRepository.ts`: operacoes Prisma para listas.
 - `src/server/services/listService.ts`: regras de negocio e validacoes da API de listas.
 - `src/server/repositories/productRepository.ts`: operacoes Prisma para produtos.
 - `src/server/services/productService.ts`: regras de negocio, ownership e validacoes da API de produtos.
+- `src/server/repositories/priceHistoryRepository.ts`: operacoes Prisma para historico de precos.
+- `src/server/services/priceHistoryService.ts`: filtros, ownership, normalizacao e criacao de historico.
 - `src/services/listApi.ts`: cliente `fetch` inicial para futura ativacao remota no frontend.
 - `src/services/productApi.ts`: cliente `fetch` para CRUD remoto de produtos.
+- `src/services/priceHistoryApi.ts`: cliente `fetch` para historico remoto.
 
 Variaveis obrigatorias na Vercel:
 
@@ -41,6 +45,7 @@ Variaveis obrigatorias na Vercel:
 - `DIRECT_URL`: URL direta do Supabase Postgres, usada para migrations.
 - `VITE_USE_REMOTE_LISTS`: feature flag nao sensivel. Use `false` para manter `localStorage`; use `true` apenas quando a UI de listas for migrada para API.
 - `VITE_USE_REMOTE_PRODUCTS`: feature flag nao sensivel. Use `false` para manter produtos no `localStorage`; use `true` apenas quando o CRUD de produtos for migrado para API.
+- `VITE_USE_REMOTE_PRICE_HISTORY`: feature flag nao sensivel. Use `false` para manter historico no `localStorage`; use `true` quando Dashboard/Histórico forem alimentados pela API.
 
 Nao coloque valores reais no codigo. Use `.env.example` apenas como modelo e configure os valores reais em `Vercel > Project Settings > Environment Variables`.
 
@@ -85,6 +90,29 @@ Regras implementadas no backend:
 - `quantity` e `unitPrice` aceitam vazio e usam `Decimal` no banco.
 - `purchased` e `sortOrder` preservam a regra visual: itens nao comprados aparecem primeiro, comprados vao para o fim e, ao desmarcar, retornam para a ordem original.
 - `Valor total` segue calculado em runtime no frontend e nao e persistido.
+
+## Supabase Postgres + Prisma - fase 4
+
+Esta fase prepara o historico de precos remoto usando Vercel Functions, Prisma e Supabase Postgres. O `localStorage` permanece como fallback por padrao e a troca gradual e controlada por `VITE_USE_REMOTE_PRICE_HISTORY=true`.
+
+Endpoints de historico:
+
+- `GET /api/price-history?userId=<id>`
+- `GET /api/price-history?userId=<id>&productName=Arroz&supermarket=Mercado&monthStart=2026-01&monthEnd=2026-06`
+- `POST /api/price-history`
+- `GET /api/price-history/:id?userId=<id>`
+- `DELETE /api/price-history/:id?userId=<id>`
+
+Regras implementadas:
+
+- Prisma continua restrito ao backend/API.
+- Toda leitura e exclusao filtra por `userId`.
+- `productId`, `listId` e `quantity` sao opcionais para manter compatibilidade com historicos antigos baseados apenas no nome do produto.
+- `price` usa `Decimal` no banco.
+- `createdAt` no Prisma mapeia para a coluna existente `recordedAt`, preservando dados criados na fase inicial.
+- Quando o CRUD remoto de produtos cria um produto com `unitPrice > 0`, a API gera historico automaticamente.
+- Quando a edicao remota altera `unitPrice` para um valor valido maior que zero, a API gera novo historico; salvar o mesmo valor novamente nao duplica registro.
+- Dashboard e tela de Historico carregam dados da API quando `VITE_USE_REMOTE_PRICE_HISTORY=true`; caso contrario seguem usando `localStorage`.
 
 ## Por que Vite + React
 

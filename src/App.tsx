@@ -51,6 +51,11 @@ import {
   togglePurchased as toggleRemotePurchased,
   updateProduct as updateRemoteProduct
 } from "./services/productApi";
+import {
+  USE_REMOTE_PRICE_HISTORY,
+  createPriceHistory as createRemotePriceHistory,
+  getPriceHistory as getRemotePriceHistory
+} from "./services/priceHistoryApi";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
@@ -233,6 +238,28 @@ export function App() {
     };
   }, [currentUser, selectedListId]);
 
+  useEffect(() => {
+    if (!USE_REMOTE_PRICE_HISTORY || !currentUser) {
+      return;
+    }
+
+    let isMounted = true;
+    getRemotePriceHistory(currentUser.uid)
+      .then((history) => {
+        if (!isMounted) {
+          return;
+        }
+        setDatabase((current) => replacePriceHistoryForUser(current, currentUser.uid, history));
+      })
+      .catch((error) => {
+        console.error("Nao foi possivel carregar historico remoto.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
+
   const pendingUserHasPasskey = useMemo(() => {
     const userId = pendingPasskeyUser?.uid;
     return Boolean(userId && database.passkeys.some((passkey) => passkey.userId === userId));
@@ -271,6 +298,21 @@ export function App() {
       ...current,
       products: current.products.filter((product) => !(product.id === productId && product.userId === userId))
     };
+  }
+
+  function replacePriceHistoryForUser(current: AppDatabase, userId: string, priceHistory: PriceHistory[]) {
+    return {
+      ...current,
+      priceHistory: [...current.priceHistory.filter((history) => history.userId !== userId), ...priceHistory]
+    };
+  }
+
+  async function refreshRemotePriceHistory(userId: string) {
+    if (!USE_REMOTE_PRICE_HISTORY) {
+      return;
+    }
+    const history = await getRemotePriceHistory(userId);
+    setDatabase((current) => replacePriceHistoryForUser(current, userId, history));
   }
 
   function reportRemoteProductError(error: unknown, fallbackMessage: string) {
@@ -523,7 +565,7 @@ export function App() {
           updateDatabase((current) => ({
             ...upsertProduct(current, product),
             priceHistory:
-              unitPrice !== null && unitPrice > 0
+              !USE_REMOTE_PRICE_HISTORY && unitPrice !== null && unitPrice > 0
                 ? [
                     ...current.priceHistory,
                     {
@@ -540,9 +582,27 @@ export function App() {
                 : current.priceHistory,
             lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
           }));
+          void refreshRemotePriceHistory(currentUser.uid).catch((error) =>
+            reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
+          );
         })
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o produto."));
       return;
+    }
+
+    if (USE_REMOTE_PRICE_HISTORY && unitPrice !== null && unitPrice > 0) {
+      void createRemotePriceHistory({
+        userId: currentUser.uid,
+        listId,
+        productName: name,
+        brand,
+        quantity,
+        price: unitPrice,
+        supermarket,
+        createdAt: new Date(timestamp).toISOString()
+      })
+        .then(() => refreshRemotePriceHistory(currentUser.uid))
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o historico remoto."));
     }
 
     updateDatabase((current) => {
@@ -564,7 +624,7 @@ export function App() {
         sortOrder: nextSortOrder
       };
       const history: PriceHistory[] =
-        unitPrice !== null && unitPrice > 0
+        !USE_REMOTE_PRICE_HISTORY && unitPrice !== null && unitPrice > 0
           ? [
               ...current.priceHistory,
               {
@@ -667,7 +727,7 @@ export function App() {
           updateDatabase((current) => ({
             ...upsertProduct(current, updated),
             priceHistory:
-              historyPrice !== null
+              !USE_REMOTE_PRICE_HISTORY && historyPrice !== null
                 ? [
                     ...current.priceHistory,
                     {
@@ -684,9 +744,35 @@ export function App() {
                 : current.priceHistory,
             lists: current.lists.map((list) => (list.id === target.listId ? { ...list, updatedAt: timestamp } : list))
           }));
+          void refreshRemotePriceHistory(currentUser.uid).catch((error) =>
+            reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
+          );
         })
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar o produto."));
       return;
+    }
+
+    const targetForRemoteHistory = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+    if (
+      USE_REMOTE_PRICE_HISTORY &&
+      targetForRemoteHistory &&
+      typeof nextUnitPrice === "number" &&
+      nextUnitPrice > 0 &&
+      nextUnitPrice !== targetForRemoteHistory.unitPrice
+    ) {
+      void createRemotePriceHistory({
+        userId: currentUser.uid,
+        listId: targetForRemoteHistory.listId,
+        productId,
+        productName: targetForRemoteHistory.name,
+        brand: nextBrand,
+        quantity: nextQuantity,
+        price: nextUnitPrice,
+        supermarket: nextSupermarket,
+        createdAt: new Date(timestamp).toISOString()
+      })
+        .then(() => refreshRemotePriceHistory(currentUser.uid))
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o historico remoto."));
     }
 
     updateDatabase((current) => {
@@ -705,7 +791,7 @@ export function App() {
       const historyPrice =
         typeof nextUnitPrice === "number" && nextUnitPrice > 0 && nextUnitPrice !== target.unitPrice ? nextUnitPrice : null;
       const history =
-        historyPrice !== null
+        !USE_REMOTE_PRICE_HISTORY && historyPrice !== null
           ? [
               ...current.priceHistory,
               {

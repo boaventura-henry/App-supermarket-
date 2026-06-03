@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { AppError } from "../errors";
+import { createAutoPriceHistory } from "./priceHistoryService";
 import * as productRepository from "../repositories/productRepository";
 import type { ListRecord, ProductRecord, ProductUpdateInput } from "../repositories/productRepository";
 
@@ -39,6 +40,19 @@ export async function createProduct(listId: unknown, payload: ProductPayload) {
     sortOrder
   });
 
+  if (unitPrice && unitPrice.greaterThan(0)) {
+    await createAutoPriceHistory({
+      userId: user.id,
+      listId: list.id,
+      productId: product.id,
+      productName: product.name,
+      brand: product.brand,
+      supermarket: product.supermarket,
+      quantity: product.quantity,
+      price: unitPrice
+    });
+  }
+
   return mapProduct(product);
 }
 
@@ -68,7 +82,26 @@ export async function updateProduct(id: unknown, payload: ProductPayload) {
     throw new AppError(400, "Informe ao menos um campo para atualizar.");
   }
 
+  const previousUnitPrice = current.unitPrice;
   const updated = await productRepository.update(current.id, data);
+
+  if (
+    data.unitPrice &&
+    data.unitPrice.greaterThan(0) &&
+    (!previousUnitPrice || !data.unitPrice.equals(previousUnitPrice))
+  ) {
+    await createAutoPriceHistory({
+      userId: user.id,
+      listId: updated.listId,
+      productId: updated.id,
+      productName: updated.name,
+      brand: updated.brand,
+      supermarket: updated.supermarket,
+      quantity: updated.quantity,
+      price: data.unitPrice
+    });
+  }
+
   return mapProduct(updated);
 }
 

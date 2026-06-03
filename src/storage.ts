@@ -102,10 +102,22 @@ function normalizeDatabase(database: AppDatabase): AppDatabase {
     nextOrderByList.set(key, currentOrder + 1);
   }
 
+  const priceHistory = database.priceHistory
+    .map((history) => ({
+      ...history,
+      productName: history.productName?.trim() || "Produto sem nome",
+      brand: history.brand ?? "",
+      price: Number.isFinite(history.price) && history.price >= 0 ? history.price : 0,
+      supermarket: history.supermarket?.trim() || "Sem supermercado",
+      timestamp: Number.isFinite(history.timestamp) ? history.timestamp : Date.now()
+    }))
+    .filter((history) => history.price > 0);
+
   return {
     ...database,
     lists,
     products,
+    priceHistory,
     passkeys: database.passkeys ?? []
   };
 }

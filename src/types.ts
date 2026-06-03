@@ -44,8 +44,10 @@ export type PriceHistory = {
   id: string;
   userId: string;
   listId?: string;
+  productId?: string;
   productName: string;
   brand?: string;
+  quantity?: number | null;
   price: number;
   supermarket: string;
   timestamp: number;
