@@ -51,7 +51,7 @@ model Product {
   quantity    Decimal?     @db.Decimal(12, 3)
   unitPrice   Decimal?     @db.Decimal(12, 2)
   supermarket String       @default("")
-  isBought    Boolean      @default(false)
+  purchased   Boolean      @default(false) @map("isBought")
   sortOrder   Int          @default(0)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -59,7 +59,7 @@ model Product {
   list        ShoppingList @relation(fields: [listId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([listId, isBought, sortOrder])
+  @@index([listId, purchased, sortOrder])
   @@map("products")
 }
 

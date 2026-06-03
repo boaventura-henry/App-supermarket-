@@ -27,15 +27,20 @@ Arquivos principais:
 - `src/server/prisma.ts`: instancia unica/reutilizavel do Prisma Client para ambiente serverless.
 - `api/db-health.ts`: endpoint inicial de health check de banco para Vercel Serverless Functions.
 - `api/lists`: endpoints serverless para gerenciamento de listas via Prisma.
+- `api/products`: endpoints serverless para gerenciamento de produtos via Prisma.
 - `src/server/repositories/listRepository.ts`: operacoes Prisma para listas.
 - `src/server/services/listService.ts`: regras de negocio e validacoes da API de listas.
+- `src/server/repositories/productRepository.ts`: operacoes Prisma para produtos.
+- `src/server/services/productService.ts`: regras de negocio, ownership e validacoes da API de produtos.
 - `src/services/listApi.ts`: cliente `fetch` inicial para futura ativacao remota no frontend.
+- `src/services/productApi.ts`: cliente `fetch` para CRUD remoto de produtos.
 
 Variaveis obrigatorias na Vercel:
 
 - `DATABASE_URL`: URL pooled do Supabase Postgres, usada pelo Prisma Client em runtime serverless.
 - `DIRECT_URL`: URL direta do Supabase Postgres, usada para migrations.
 - `VITE_USE_REMOTE_LISTS`: feature flag nao sensivel. Use `false` para manter `localStorage`; use `true` apenas quando a UI de listas for migrada para API.
+- `VITE_USE_REMOTE_PRODUCTS`: feature flag nao sensivel. Use `false` para manter produtos no `localStorage`; use `true` apenas quando o CRUD de produtos for migrado para API.
 
 Nao coloque valores reais no codigo. Use `.env.example` apenas como modelo e configure os valores reais em `Vercel > Project Settings > Environment Variables`.
 
@@ -59,6 +64,27 @@ Endpoints de listas preparados para a Fase 2:
 - `DELETE /api/lists/:id?userId=<id>`
 
 Todas as operacoes filtram por `userId` no backend. Nesta fase, o `userId` pode ser o UUID do banco ou o `legacyId` vindo da migracao futura do `localStorage`. A UI ainda permanece em `localStorage` por padrao.
+
+## Supabase Postgres + Prisma - fase 3
+
+Esta fase prepara o CRUD remoto de produtos usando Vercel Functions, Prisma e Supabase Postgres. O `localStorage` continua ativo por padrao para preservar a experiencia atual e os dados antigos. A troca para API remota e controlada por `VITE_USE_REMOTE_PRODUCTS=true`.
+
+Endpoints de produtos:
+
+- `GET /api/lists/:listId/products?userId=<id>`
+- `POST /api/lists/:listId/products`
+- `PUT /api/products/:id`
+- `DELETE /api/products/:id?userId=<id>`
+- `PATCH /api/products/:id/purchased`
+
+Regras implementadas no backend:
+
+- Prisma roda apenas em `api/`/`src/server`, nunca no navegador.
+- Toda escrita valida `userId` e ownership da lista/produto.
+- Usuarios podem visualizar produtos de listas compartilhadas, mas somente o criador da lista pode criar, editar, excluir ou marcar comprado.
+- `quantity` e `unitPrice` aceitam vazio e usam `Decimal` no banco.
+- `purchased` e `sortOrder` preservam a regra visual: itens nao comprados aparecem primeiro, comprados vao para o fim e, ao desmarcar, retornam para a ordem original.
+- `Valor total` segue calculado em runtime no frontend e nao e persistido.
 
 ## Por que Vite + React
 

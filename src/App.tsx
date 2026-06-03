@@ -43,6 +43,14 @@ import {
   getPasskeyAssertion,
   getPasskeySupport
 } from "./webauthn";
+import {
+  USE_REMOTE_PRODUCTS,
+  createProduct as createRemoteProduct,
+  deleteProduct as deleteRemoteProduct,
+  getProducts as getRemoteProducts,
+  togglePurchased as toggleRemotePurchased,
+  updateProduct as updateRemoteProduct
+} from "./services/productApi";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
@@ -203,6 +211,28 @@ export function App() {
     return getUserData(database, currentUser.uid);
   }, [currentUser, database]);
 
+  useEffect(() => {
+    if (!USE_REMOTE_PRODUCTS || !currentUser || !selectedListId) {
+      return;
+    }
+
+    let isMounted = true;
+    getRemoteProducts(selectedListId, currentUser.uid)
+      .then((products) => {
+        if (!isMounted) {
+          return;
+        }
+        setDatabase((current) => replaceProductsForList(current, selectedListId, products));
+      })
+      .catch((error) => {
+        console.error("Nao foi possivel carregar produtos remotos.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser, selectedListId]);
+
   const pendingUserHasPasskey = useMemo(() => {
     const userId = pendingPasskeyUser?.uid;
     return Boolean(userId && database.passkeys.some((passkey) => passkey.userId === userId));
@@ -219,6 +249,33 @@ export function App() {
 
   function updateDatabase(updater: (database: AppDatabase) => AppDatabase) {
     setDatabase((current) => updater(current));
+  }
+
+  function replaceProductsForList(current: AppDatabase, listId: string, products: Product[]) {
+    return {
+      ...current,
+      products: [...current.products.filter((product) => product.listId !== listId), ...products]
+    };
+  }
+
+  function upsertProduct(current: AppDatabase, product: Product) {
+    const exists = current.products.some((item) => item.id === product.id);
+    return {
+      ...current,
+      products: exists ? current.products.map((item) => (item.id === product.id ? product : item)) : [...current.products, product]
+    };
+  }
+
+  function removeProduct(current: AppDatabase, productId: string, userId: string) {
+    return {
+      ...current,
+      products: current.products.filter((product) => !(product.id === productId && product.userId === userId))
+    };
+  }
+
+  function reportRemoteProductError(error: unknown, fallbackMessage: string) {
+    console.error(fallbackMessage, error);
+    window.alert(error instanceof Error ? error.message : fallbackMessage);
   }
 
   function userNeedsPasskeyOffer(user: User) {
@@ -452,6 +509,42 @@ export function App() {
     const brand = form.brand.trim();
     const supermarket = form.supermarket.trim();
     const timestamp = Date.now();
+
+    if (USE_REMOTE_PRODUCTS) {
+      void createRemoteProduct(listId, {
+        userId: currentUser.uid,
+        name,
+        brand,
+        quantity,
+        unitPrice,
+        supermarket
+      })
+        .then((product) => {
+          updateDatabase((current) => ({
+            ...upsertProduct(current, product),
+            priceHistory:
+              unitPrice !== null && unitPrice > 0
+                ? [
+                    ...current.priceHistory,
+                    {
+                      id: createId("hist"),
+                      userId: currentUser.uid,
+                      listId,
+                      productName: name,
+                      brand,
+                      price: unitPrice,
+                      supermarket,
+                      timestamp
+                    }
+                  ]
+                : current.priceHistory,
+            lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
+          }));
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o produto."));
+      return;
+    }
+
     updateDatabase((current) => {
       const nextSortOrder =
         current.products
@@ -499,6 +592,14 @@ export function App() {
     if (!currentUser) {
       return;
     }
+    if (USE_REMOTE_PRODUCTS) {
+      void deleteRemoteProduct(productId, currentUser.uid)
+        .then(() => {
+          updateDatabase((current) => removeProduct(current, productId, currentUser.uid));
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel excluir o produto."));
+      return;
+    }
     updateDatabase((current) => ({
       ...current,
       products: current.products.filter((product) => !(product.id === productId && product.userId === currentUser.uid))
@@ -507,6 +608,18 @@ export function App() {
 
   function toggleBought(productId: string) {
     if (!currentUser) {
+      return;
+    }
+    if (USE_REMOTE_PRODUCTS) {
+      const target = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+      if (!target) {
+        return;
+      }
+      void toggleRemotePurchased(productId, currentUser.uid, !target.isBought)
+        .then((product) => {
+          updateDatabase((current) => upsertProduct(current, product));
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar o status do produto."));
       return;
     }
     updateDatabase((current) => ({
@@ -535,6 +648,46 @@ export function App() {
     const nextUnitPrice = draft.unitPrice.trim() === "" || parsedPrice === null ? null : parsedPrice;
     const nextSupermarket = draft.supermarket.trim();
     const timestamp = Date.now();
+
+    if (USE_REMOTE_PRODUCTS) {
+      const target = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+      if (!target) {
+        return;
+      }
+      void updateRemoteProduct(productId, {
+        userId: currentUser.uid,
+        brand: nextBrand,
+        quantity: nextQuantity,
+        unitPrice: nextUnitPrice,
+        supermarket: nextSupermarket
+      })
+        .then((updated) => {
+          const historyPrice =
+            typeof nextUnitPrice === "number" && nextUnitPrice > 0 && nextUnitPrice !== target.unitPrice ? nextUnitPrice : null;
+          updateDatabase((current) => ({
+            ...upsertProduct(current, updated),
+            priceHistory:
+              historyPrice !== null
+                ? [
+                    ...current.priceHistory,
+                    {
+                      id: createId("hist"),
+                      userId: currentUser.uid,
+                      listId: target.listId,
+                      productName: target.name,
+                      brand: nextBrand,
+                      price: historyPrice,
+                      supermarket: nextSupermarket,
+                      timestamp
+                    }
+                  ]
+                : current.priceHistory,
+            lists: current.lists.map((list) => (list.id === target.listId ? { ...list, updatedAt: timestamp } : list))
+          }));
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar o produto."));
+      return;
+    }
 
     updateDatabase((current) => {
       const target = current.products.find((product) => product.id === productId && product.userId === currentUser.uid);
@@ -588,6 +741,28 @@ export function App() {
     }
 
     const timestamp = Date.now();
+    if (USE_REMOTE_PRODUCTS) {
+      const targets = database.products.filter((product) => product.userId === currentUser.uid && product.listId === listId);
+      void Promise.all(
+        targets.map((product) =>
+          updateRemoteProduct(product.id, {
+            userId: currentUser.uid,
+            brand: fields.brand ? "" : product.brand,
+            quantity: fields.quantity ? null : product.quantity,
+            unitPrice: fields.unitPrice ? null : product.unitPrice,
+            supermarket: fields.supermarket ? "" : product.supermarket
+          })
+        )
+      )
+        .then((products) => {
+          updateDatabase((current) => ({
+            ...products.reduce((next, product) => upsertProduct(next, product), current),
+            lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
+          }));
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel limpar os campos da lista."));
+      return;
+    }
     updateDatabase((current) => ({
       ...current,
       products: current.products.map((product) => {

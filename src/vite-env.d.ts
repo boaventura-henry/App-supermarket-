@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_USE_REMOTE_LISTS?: string;
+  readonly VITE_USE_REMOTE_PRODUCTS?: string;
 }
 
 interface ImportMeta {
