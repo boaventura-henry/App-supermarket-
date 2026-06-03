@@ -33,6 +33,7 @@ import {
   hashText,
   loadDatabase,
   normalizeEmail,
+  readLocalDatabaseSnapshot,
   saveDatabase,
   sortByNewest
 } from "./storage";
@@ -56,6 +57,11 @@ import {
   createPriceHistory as createRemotePriceHistory,
   getPriceHistory as getRemotePriceHistory
 } from "./services/priceHistoryApi";
+import {
+  ENABLE_LOCAL_DATA_MIGRATION,
+  importLocalData,
+  type MigrationResult
+} from "./services/migrationApi";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
@@ -935,6 +941,7 @@ export function App() {
         onToggleTheme={toggleTheme}
         theme={theme}
         userName={currentUser.name}
+        enableMigration={ENABLE_LOCAL_DATA_MIGRATION}
       />
 
       {view === "home" ? <Home products={userData.products} /> : null}
@@ -984,6 +991,8 @@ export function App() {
       {view === "dashboard" ? <Dashboard products={userData.products} priceHistory={userData.priceHistory} /> : null}
 
       {view === "history" ? <HistoryView priceHistory={userData.priceHistory} /> : null}
+
+      {view === "migration" && ENABLE_LOCAL_DATA_MIGRATION ? <MigrationView currentUser={currentUser} /> : null}
     </main>
   );
 }
@@ -2111,6 +2120,184 @@ function SharedListsContent(props: {
   );
 }
 
+function MigrationView({ currentUser }: { currentUser: User }) {
+  const [snapshot, setSnapshot] = useState(() => readLocalDatabaseSnapshot());
+  const [result, setResult] = useState<MigrationResult | null>(null);
+  const [error, setError] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
+
+  const localDatabase = snapshot.database;
+  const localUser = localDatabase?.users.find((user) => user.uid === currentUser.uid) ?? null;
+  const userLists = localDatabase?.lists.filter((list) => list.userId === currentUser.uid) ?? [];
+  const userProducts = localDatabase?.products.filter((product) => product.userId === currentUser.uid) ?? [];
+  const userPriceHistory = localDatabase?.priceHistory.filter((history) => history.userId === currentUser.uid) ?? [];
+  const userPasskeys = localDatabase?.passkeys.filter((passkey) => passkey.userId === currentUser.uid) ?? [];
+  const totalLocalItems =
+    (localDatabase?.users.length ?? 0) +
+    (localDatabase?.lists.length ?? 0) +
+    (localDatabase?.products.length ?? 0) +
+    (localDatabase?.priceHistory.length ?? 0);
+
+  function refreshPreview() {
+    setSnapshot(readLocalDatabaseSnapshot());
+    setResult(null);
+    setError("");
+  }
+
+  async function startImport() {
+    setError("");
+    setResult(null);
+
+    if (!localDatabase || !localUser) {
+      setError("Nenhum usuario local correspondente ao login atual foi encontrado.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Importar os dados deste usuario para a nuvem? Os dados locais nao serao apagados e a importacao pode ser executada novamente."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const response = await importLocalData({
+        user: localUser,
+        lists: userLists,
+        products: userProducts,
+        priceHistory: userPriceHistory,
+        passkeys: userPasskeys
+      });
+      setResult(response);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel importar os dados locais.");
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  if (snapshot.error) {
+    return (
+      <section className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+        <div className="panel">
+          <h2 className="text-2xl font-black">Migrar dados para nuvem</h2>
+          <p className="mt-3 text-supermarket-ink/70">{snapshot.error}</p>
+          <button className="button-secondary mt-5" type="button" onClick={refreshPreview}>
+            <RefreshCcw size={16} />
+            Tentar novamente
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (!localDatabase || totalLocalItems === 0) {
+    return (
+      <section className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+        <div className="panel">
+          <h2 className="text-2xl font-black">Migrar dados para nuvem</h2>
+          <p className="mt-3 text-supermarket-ink/70">Nenhum dado local encontrado para importar.</p>
+          <button className="button-secondary mt-5" type="button" onClick={refreshPreview}>
+            <RefreshCcw size={16} />
+            Atualizar previa
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mb-5">
+        <p className="text-sm font-black uppercase text-supermarket-leaf">Migracao</p>
+        <h2 className="text-2xl font-black">Migrar dados para nuvem</h2>
+        <p className="mt-2 text-supermarket-ink/70">
+          Os dados locais nao serao apagados. Esta importacao pode ser executada novamente sem duplicar registros.
+        </p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="panel">
+          <h3 className="mb-4 text-xl font-black">Previa local</h3>
+          <div className="space-y-3">
+            <Summary label="Usuarios encontrados" value={String(localDatabase.users.length)} />
+            <Summary label="Listas encontradas" value={String(localDatabase.lists.length)} />
+            <Summary label="Produtos encontrados" value={String(localDatabase.products.length)} />
+            <Summary label="Historicos encontrados" value={String(localDatabase.priceHistory.length)} />
+            <Summary label="Usuario local ativo" value={localUser ? `${localUser.name} (${localUser.email})` : "Nao encontrado"} />
+            <Summary label="Leitura" value={new Date(snapshot.readAt).toLocaleString("pt-BR")} />
+          </div>
+        </section>
+
+        <section className="panel">
+          <h3 className="mb-4 text-xl font-black">Sera importado agora</h3>
+          <div className="space-y-3">
+            <Summary label="Usuario logado" value={currentUser.email} />
+            <Summary label="Listas do usuario" value={String(userLists.length)} />
+            <Summary label="Produtos do usuario" value={String(userProducts.length)} />
+            <Summary label="Historicos do usuario" value={String(userPriceHistory.length)} />
+            <Summary label="Passkeys publicas" value={String(userPasskeys.length)} />
+            <Summary label="Outros usuarios ignorados" value={String(Math.max(localDatabase.users.length - 1, 0))} />
+          </div>
+        </section>
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-3">
+        <button className="button-primary" type="button" onClick={startImport} disabled={isImporting || !localUser}>
+          <Save size={16} />
+          {isImporting ? "Importando..." : "Importar dados para nuvem"}
+        </button>
+        <button className="button-secondary" type="button" onClick={refreshPreview} disabled={isImporting}>
+          <RefreshCcw size={16} />
+          Atualizar previa
+        </button>
+      </div>
+
+      {error ? <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 font-bold text-red-700">{error}</div> : null}
+
+      {result ? (
+        <section className="panel mt-5">
+          <h3 className="mb-4 text-xl font-black">Resultado da importacao</h3>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {Object.entries(result.summary).map(([key, value]) => (
+              <Summary key={key} label={formatMigrationSummaryLabel(key)} value={String(value)} />
+            ))}
+          </div>
+          {result.warnings.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+              <p className="font-black">Avisos</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-supermarket-ink/75">
+                {result.warnings.map((warning, index) => (
+                  <li key={`${warning}-${index}`}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+    </section>
+  );
+}
+
+function formatMigrationSummaryLabel(key: string) {
+  const labels: Record<string, string> = {
+    userImported: "Usuario importado",
+    userSkipped: "Usuario ignorado",
+    listsImported: "Listas importadas",
+    listsSkipped: "Listas ignoradas",
+    productsImported: "Produtos importados",
+    productsSkipped: "Produtos ignorados",
+    priceHistoryImported: "Historicos importados",
+    priceHistorySkipped: "Historicos ignorados",
+    passkeysImported: "Passkeys importadas",
+    passkeysSkipped: "Passkeys ignoradas",
+    duplicatesDetected: "Duplicados detectados"
+  };
+
+  return labels[key] ?? key;
+}
+
 function Dashboard({ products, priceHistory }: { products: Product[]; priceHistory: PriceHistory[] }) {
   const productNames = useMemo(
     () => Array.from(new Set(priceHistory.map((item) => item.productName))).sort(),
@@ -2391,7 +2578,8 @@ function SideMenu({
   onLogout,
   onToggleTheme,
   theme,
-  userName
+  userName,
+  enableMigration
 }: {
   currentView: View;
   isOpen: boolean;
@@ -2401,6 +2589,7 @@ function SideMenu({
   onToggleTheme: () => void;
   theme: ThemeMode;
   userName: string;
+  enableMigration: boolean;
 }) {
   return (
     <>
@@ -2441,6 +2630,11 @@ function SideMenu({
           <NavButton active={currentView === "history"} onClick={() => onNavigate("history")}>
             Historico
           </NavButton>
+          {enableMigration ? (
+            <NavButton active={currentView === "migration"} onClick={() => onNavigate("migration")}>
+              Migrar dados para nuvem
+            </NavButton>
+          ) : null}
         </nav>
 
         <div className="side-menu-footer">

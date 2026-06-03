@@ -29,15 +29,19 @@ Arquivos principais:
 - `api/lists`: endpoints serverless para gerenciamento de listas via Prisma.
 - `api/products`: endpoints serverless para gerenciamento de produtos via Prisma.
 - `api/price-history`: endpoints serverless para historico de precos via Prisma.
+- `api/migration/import-local-data.ts`: endpoint seguro para importar dados antigos do `localStorage`.
 - `src/server/repositories/listRepository.ts`: operacoes Prisma para listas.
 - `src/server/services/listService.ts`: regras de negocio e validacoes da API de listas.
 - `src/server/repositories/productRepository.ts`: operacoes Prisma para produtos.
 - `src/server/services/productService.ts`: regras de negocio, ownership e validacoes da API de produtos.
 - `src/server/repositories/priceHistoryRepository.ts`: operacoes Prisma para historico de precos.
 - `src/server/services/priceHistoryService.ts`: filtros, ownership, normalizacao e criacao de historico.
+- `src/server/repositories/migrationRepository.ts`: operacoes Prisma transacionais para importacao.
+- `src/server/services/migrationService.ts`: normalizacao, validacao, deduplicacao e relatorio de importacao.
 - `src/services/listApi.ts`: cliente `fetch` inicial para futura ativacao remota no frontend.
 - `src/services/productApi.ts`: cliente `fetch` para CRUD remoto de produtos.
 - `src/services/priceHistoryApi.ts`: cliente `fetch` para historico remoto.
+- `src/services/migrationApi.ts`: cliente `fetch` para a ferramenta de importacao local.
 
 Variaveis obrigatorias na Vercel:
 
@@ -46,6 +50,7 @@ Variaveis obrigatorias na Vercel:
 - `VITE_USE_REMOTE_LISTS`: feature flag nao sensivel. Use `false` para manter `localStorage`; use `true` apenas quando a UI de listas for migrada para API.
 - `VITE_USE_REMOTE_PRODUCTS`: feature flag nao sensivel. Use `false` para manter produtos no `localStorage`; use `true` apenas quando o CRUD de produtos for migrado para API.
 - `VITE_USE_REMOTE_PRICE_HISTORY`: feature flag nao sensivel. Use `false` para manter historico no `localStorage`; use `true` quando Dashboard/Histórico forem alimentados pela API.
+- `VITE_ENABLE_LOCAL_DATA_MIGRATION`: feature flag nao sensivel. Use `false` para esconder a tela de importacao; use `true` para exibir a opcao "Migrar dados para nuvem" no menu.
 
 Nao coloque valores reais no codigo. Use `.env.example` apenas como modelo e configure os valores reais em `Vercel > Project Settings > Environment Variables`.
 
@@ -113,6 +118,57 @@ Regras implementadas:
 - Quando o CRUD remoto de produtos cria um produto com `unitPrice > 0`, a API gera historico automaticamente.
 - Quando a edicao remota altera `unitPrice` para um valor valido maior que zero, a API gera novo historico; salvar o mesmo valor novamente nao duplica registro.
 - Dashboard e tela de Historico carregam dados da API quando `VITE_USE_REMOTE_PRICE_HISTORY=true`; caso contrario seguem usando `localStorage`.
+
+## Supabase Postgres + Prisma - fase 5
+
+Esta fase adiciona uma ferramenta segura para importar dados antigos do `localStorage` (`app-supermarket-db-v2`) para Supabase Postgres usando as APIs serverless e Prisma no backend.
+
+Endpoint de importacao:
+
+- `POST /api/migration/import-local-data`
+
+Como ativar a tela:
+
+```bash
+VITE_ENABLE_LOCAL_DATA_MIGRATION=true
+```
+
+Com a flag ativa, o menu exibe "Migrar dados para nuvem" para usuario logado. A tela mostra uma previa antes da importacao:
+
+- usuarios encontrados no `localStorage`;
+- listas, produtos e historicos encontrados;
+- usuario local ativo;
+- dados que pertencem ao usuario logado e serao importados.
+
+Regras da importacao:
+
+- Nada e importado automaticamente.
+- O usuario precisa confirmar antes de enviar dados para a API.
+- Somente dados do usuario logado sao importados nesta fase.
+- Dados de outros usuarios aparecem no resumo, mas sao ignorados.
+- Dados locais nao sao apagados.
+- Dados remotos nao sao apagados.
+- A importacao roda em transacao Prisma quando possivel.
+- Itens invalidos sao ignorados com aviso no relatorio.
+- A deduplicacao usa `legacyId` com os IDs originais do `localStorage`; tambem ha checagens naturais para produtos e historicos quando necessario.
+- Rodar a importacao mais de uma vez nao deve duplicar tudo: duplicados sao contabilizados no relatorio.
+
+Dados sensiveis:
+
+- Nenhuma senha em texto puro e importada.
+- O fluxo atual ainda usa hashes locais temporarios apenas por compatibilidade do modelo existente.
+- Biometria nao e armazenada nem importada; passkeys, quando presentes, importam somente metadados publicos ja salvos no app.
+- A autenticacao definitiva deve ser substituida por Supabase Auth em fase futura.
+
+Resumo retornado pela API:
+
+- usuarios importados/ignorados;
+- listas importadas/ignoradas;
+- produtos importados/ignorados;
+- historicos importados/ignorados;
+- passkeys importadas/ignoradas;
+- duplicados detectados;
+- avisos de normalizacao ou dados invalidos.
 
 ## Por que Vite + React
 

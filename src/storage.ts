@@ -48,6 +48,39 @@ export function saveDatabase(database: AppDatabase) {
   localStorage.setItem(DB_KEY, JSON.stringify(database));
 }
 
+export function readLocalDatabaseSnapshot() {
+  try {
+    const stored = localStorage.getItem(DB_KEY);
+    if (!stored) {
+      return {
+        database: null,
+        error: null,
+        readAt: Date.now()
+      };
+    }
+
+    const parsed = JSON.parse(stored) as Partial<AppDatabase>;
+    return {
+      database: normalizeDatabase({
+        users: parsed.users ?? [],
+        passkeys: parsed.passkeys ?? [],
+        lists: parsed.lists ?? [],
+        products: parsed.products ?? [],
+        priceHistory: parsed.priceHistory ?? [],
+        activeUserId: parsed.activeUserId ?? null
+      }),
+      error: null,
+      readAt: Date.now()
+    };
+  } catch {
+    return {
+      database: null,
+      error: "Os dados locais parecem estar corrompidos. Nada foi apagado.",
+      readAt: Date.now()
+    };
+  }
+}
+
 export function getUserData(database: AppDatabase, userId: string) {
   return {
     lists: database.lists.filter((list) => list.userId === userId),

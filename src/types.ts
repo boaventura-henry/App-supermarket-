@@ -62,4 +62,4 @@ export type AppDatabase = {
   activeUserId: string | null;
 };
 
-export type View = "home" | "list" | "shared" | "dashboard" | "history";
+export type View = "home" | "list" | "shared" | "dashboard" | "history" | "migration";
