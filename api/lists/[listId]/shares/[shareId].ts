@@ -1,6 +1,6 @@
-import { getAuthenticatedUser } from "../../../../../src/server/auth/getAuthenticatedUser";
-import { getBody, getQueryParam, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../../../../_utils";
-import * as shareService from "../../../../../src/server/services/shareService";
+import { getAuthenticatedUser } from "../../../../src/server/auth/getAuthenticatedUser";
+import { getBody, getQueryParam, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../../../_utils";
+import * as shareService from "../../../../src/server/services/shareService";
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
   const listId = getQueryParam(request, "listId");
