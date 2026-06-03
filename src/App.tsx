@@ -62,6 +62,18 @@ import {
   importLocalData,
   type MigrationResult
 } from "./services/migrationApi";
+import {
+  USE_SUPABASE_AUTH,
+  getCurrentSession,
+  onAuthStateChange,
+  resetPassword,
+  signIn,
+  signOut,
+  signUp,
+  toAuthUser,
+  type AuthUser
+} from "./services/authService";
+import { getProfile } from "./services/profileApi";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
@@ -162,6 +174,17 @@ function productToEditDraft(product: Product): ProductEditDraft {
   };
 }
 
+function authUserToLocalUser(user: AuthUser): User {
+  return {
+    uid: user.id,
+    name: user.name || user.email,
+    email: user.email,
+    passwordHash: "supabase-auth",
+    securityAnswerHash: "supabase-auth",
+    createdAt: Date.parse(user.createdAt) || Date.now()
+  };
+}
+
 function loadTheme(): ThemeMode {
   return localStorage.getItem("app-supermarket-theme") === "dark" ? "dark" : "light";
 }
@@ -199,6 +222,41 @@ export function App() {
     });
     return () => {
       isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!USE_SUPABASE_AUTH) {
+      return;
+    }
+
+    let isMounted = true;
+    getCurrentSession()
+      .then((session) => {
+        if (isMounted && session?.user) {
+          syncAuthenticatedUser(toAuthUser(session.user));
+        }
+      })
+      .catch((error) => {
+        setAuthError(error instanceof Error ? error.message : "Sessao Supabase indisponivel.");
+      });
+
+    let subscription: ReturnType<typeof onAuthStateChange> | null = null;
+    try {
+      subscription = onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          syncAuthenticatedUser(toAuthUser(session.user));
+          return;
+        }
+        setDatabase((current) => ({ ...current, activeUserId: null }));
+      });
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Supabase Auth nao esta configurado.");
+    }
+
+    return () => {
+      isMounted = false;
+      subscription?.data.subscription.unsubscribe();
     };
   }, []);
 
@@ -284,6 +342,27 @@ export function App() {
     setDatabase((current) => updater(current));
   }
 
+  function syncAuthenticatedUser(authUser: AuthUser) {
+    const localUser = authUserToLocalUser(authUser);
+    setDatabase((current) => {
+      const exists = current.users.some((user) => user.uid === localUser.uid);
+      return {
+        ...current,
+        users: exists ? current.users.map((user) => (user.uid === localUser.uid ? { ...user, ...localUser } : user)) : [...current.users, localUser],
+        activeUserId: localUser.uid
+      };
+    });
+    setPendingPasskeyUserId(null);
+    setAuthMessage("");
+    setAuthError("");
+    setView("home");
+    if (USE_SUPABASE_AUTH) {
+      void getProfile().catch((error) => {
+        console.error("Nao foi possivel sincronizar o perfil Supabase.", error);
+      });
+    }
+  }
+
   function replaceProductsForList(current: AppDatabase, listId: string, products: Product[]) {
     return {
       ...current,
@@ -344,6 +423,18 @@ export function App() {
     setAuthMessage("");
     setPasskeyError("");
     setPasskeyMessage("");
+    if (USE_SUPABASE_AUTH) {
+      try {
+        const user = await signIn(normalizeEmail(email), password);
+        if (user) {
+          syncAuthenticatedUser(user);
+        }
+      } catch (err) {
+        setAuthError(err instanceof Error ? err.message : "Login invalido.");
+      }
+      return;
+    }
+
     const normalizedEmail = normalizeEmail(email);
     const passwordHash = await hashText(password);
     const user = database.users.find((item) => item.email === normalizedEmail);
@@ -366,6 +457,26 @@ export function App() {
     setPasskeyError("");
     setPasskeyMessage("");
     const normalizedEmail = normalizeEmail(email);
+    if (USE_SUPABASE_AUTH) {
+      if (!name.trim() || !normalizedEmail || password.length < 6) {
+        setAuthError("Preencha nome, e-mail e senha com 6+ caracteres.");
+        return;
+      }
+      try {
+        const user = await signUp(normalizedEmail, password, { name: name.trim() });
+        if (user) {
+          syncAuthenticatedUser(user);
+          setAuthMessage("Conta criada. Se o Supabase exigir confirmacao, verifique seu e-mail.");
+        } else {
+          setAuthMessage("Conta criada. Verifique seu e-mail para confirmar o acesso.");
+          setAuthMode("login");
+        }
+      } catch (err) {
+        setAuthError(err instanceof Error ? err.message : "Nao foi possivel criar a conta.");
+      }
+      return;
+    }
+
     if (!name.trim() || !normalizedEmail || password.length < 6 || !securityAnswer.trim()) {
       setAuthError("Preencha nome, e-mail, senha com 6+ caracteres e resposta de seguranca.");
       return;
@@ -398,6 +509,17 @@ export function App() {
     setAuthError("");
     setAuthMessage("");
     const normalizedEmail = normalizeEmail(email);
+    if (USE_SUPABASE_AUTH) {
+      try {
+        await resetPassword(normalizedEmail);
+        setAuthMessage("E-mail de recuperacao enviado. Verifique sua caixa de entrada.");
+        setAuthMode("login");
+      } catch (err) {
+        setAuthError(err instanceof Error ? err.message : "Nao foi possivel enviar o e-mail de recuperacao.");
+      }
+      return;
+    }
+
     const answerHash = await hashText(securityAnswer);
     const user = database.users.find((item) => item.email === normalizedEmail);
     if (!user || user.securityAnswerHash !== answerHash) {
@@ -466,6 +588,11 @@ export function App() {
   }
 
   function logout() {
+    if (USE_SUPABASE_AUTH) {
+      void signOut().catch((error) => {
+        console.error("Nao foi possivel encerrar a sessao Supabase.", error);
+      });
+    }
     updateDatabase((current) => ({ ...current, activeUserId: null }));
     setView("home");
     setPendingPasskeyUserId(null);
@@ -901,6 +1028,7 @@ export function App() {
         passkeyMessage={passkeyMessage}
         passkeyError={passkeyError}
         isPasskeyBusy={isPasskeyBusy}
+        useSupabaseAuth={USE_SUPABASE_AUTH}
       />
     );
   }
@@ -1014,7 +1142,8 @@ function AuthScreen({
   pendingUserHasPasskey,
   passkeyMessage,
   passkeyError,
-  isPasskeyBusy
+  isPasskeyBusy,
+  useSupabaseAuth
 }: {
   mode: AuthMode;
   error: string;
@@ -1033,6 +1162,7 @@ function AuthScreen({
   passkeyMessage: string;
   passkeyError: string;
   isPasskeyBusy: boolean;
+  useSupabaseAuth: boolean;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -1061,7 +1191,7 @@ function AuthScreen({
 
   const heading =
     mode === "login" ? "Entrar no aplicativo" : mode === "register" ? "Criar sua conta" : "Recuperar senha";
-  const buttonLabel = mode === "login" ? "Acessar o App" : mode === "register" ? "Criar conta" : "Salvar nova senha";
+  const buttonLabel = mode === "login" ? "Acessar o App" : mode === "register" ? "Criar conta" : useSupabaseAuth ? "Enviar e-mail" : "Salvar nova senha";
   const showPasskeyActivation = mode === "login" && Boolean(pendingPasskeyUser);
 
   function registerPendingPasskey() {
@@ -1151,6 +1281,7 @@ function AuthScreen({
               </div>
             </label>
 
+            {mode === "recover" && useSupabaseAuth ? null : (
             <label className="auth-field">
               <span>{mode === "recover" ? "Nova senha" : "Senha"}</span>
               <div className="auth-input-shell">
@@ -1161,7 +1292,7 @@ function AuthScreen({
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder={mode === "recover" ? "Nova senha" : "Senha"}
                   autoComplete={mode === "login" ? "current-password" : "new-password"}
-                  required
+                  required={!useSupabaseAuth || mode !== "recover"}
                 />
                 <button
                   className="auth-password-toggle"
@@ -1174,8 +1305,9 @@ function AuthScreen({
                 </button>
               </div>
             </label>
+            )}
 
-            {mode !== "login" ? (
+            {mode !== "login" && !useSupabaseAuth ? (
               <label className="auth-field">
                 <span>Resposta de seguranca</span>
                 <input
@@ -1187,6 +1319,16 @@ function AuthScreen({
                   required
                 />
               </label>
+            ) : null}
+            {mode === "recover" && useSupabaseAuth ? (
+              <p className="auth-passkey-hint">
+                Informe seu e-mail e enviaremos o link oficial de recuperacao do Supabase Auth.
+              </p>
+            ) : null}
+            {mode === "register" && useSupabaseAuth ? (
+              <p className="auth-passkey-hint">
+                A recuperacao de senha das novas contas sera feita por e-mail. A pergunta de seguranca fica apenas no fluxo antigo.
+              </p>
             ) : null}
           </div>
 
@@ -2127,11 +2269,15 @@ function MigrationView({ currentUser }: { currentUser: User }) {
   const [isImporting, setIsImporting] = useState(false);
 
   const localDatabase = snapshot.database;
-  const localUser = localDatabase?.users.find((user) => user.uid === currentUser.uid) ?? null;
-  const userLists = localDatabase?.lists.filter((list) => list.userId === currentUser.uid) ?? [];
-  const userProducts = localDatabase?.products.filter((product) => product.userId === currentUser.uid) ?? [];
-  const userPriceHistory = localDatabase?.priceHistory.filter((history) => history.userId === currentUser.uid) ?? [];
-  const userPasskeys = localDatabase?.passkeys.filter((passkey) => passkey.userId === currentUser.uid) ?? [];
+  const localUser =
+    localDatabase?.users.find((user) => user.uid === currentUser.uid) ??
+    localDatabase?.users.find((user) => user.email === currentUser.email) ??
+    null;
+  const importSourceUserId = localUser?.uid ?? currentUser.uid;
+  const userLists = localDatabase?.lists.filter((list) => list.userId === importSourceUserId) ?? [];
+  const userProducts = localDatabase?.products.filter((product) => product.userId === importSourceUserId) ?? [];
+  const userPriceHistory = localDatabase?.priceHistory.filter((history) => history.userId === importSourceUserId) ?? [];
+  const userPasskeys = localDatabase?.passkeys.filter((passkey) => passkey.userId === importSourceUserId) ?? [];
   const totalLocalItems =
     (localDatabase?.users.length ?? 0) +
     (localDatabase?.lists.length ?? 0) +

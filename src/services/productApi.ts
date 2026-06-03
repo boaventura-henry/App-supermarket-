@@ -1,4 +1,5 @@
 import type { Product } from "../types";
+import { apiRequest } from "./apiClient";
 
 export const USE_REMOTE_PRODUCTS = import.meta.env.VITE_USE_REMOTE_PRODUCTS === "true";
 
@@ -37,52 +38,53 @@ export async function getProducts(listId: string, userId: string) {
 }
 
 export async function createProduct(listId: string, payload: ProductPayload) {
-  const product = await request<RemoteProduct>(`/api/lists/${encodeURIComponent(listId)}/products`, {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
+  const product = await apiRequest<RemoteProduct>(
+    `/api/lists/${encodeURIComponent(listId)}/products`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    },
+    "Nao foi possivel acessar a API de produtos."
+  );
   return toLocalProduct(product, payload.userId, listId);
 }
 
 export async function updateProduct(id: string, payload: ProductPayload) {
-  const product = await request<RemoteProduct>(`/api/products/${encodeURIComponent(id)}`, {
-    method: "PUT",
-    body: JSON.stringify(payload)
-  });
+  const product = await apiRequest<RemoteProduct>(
+    `/api/products/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    },
+    "Nao foi possivel acessar a API de produtos."
+  );
   return toLocalProduct(product, payload.userId);
 }
 
 export async function deleteProduct(id: string, userId: string) {
-  return request<{ id: string }>(`/api/products/${encodeURIComponent(id)}?userId=${encodeURIComponent(userId)}`, {
-    method: "DELETE"
-  });
+  return apiRequest<{ id: string }>(
+    `/api/products/${encodeURIComponent(id)}?userId=${encodeURIComponent(userId)}`,
+    {
+      method: "DELETE"
+    },
+    "Nao foi possivel acessar a API de produtos."
+  );
 }
 
 export async function togglePurchased(id: string, userId: string, purchased: boolean) {
-  const product = await request<RemoteProduct>(`/api/products/${encodeURIComponent(id)}/purchased`, {
-    method: "PATCH",
-    body: JSON.stringify({ userId, purchased })
-  });
+  const product = await apiRequest<RemoteProduct>(
+    `/api/products/${encodeURIComponent(id)}/purchased`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ userId, purchased })
+    },
+    "Nao foi possivel acessar a API de produtos."
+  );
   return toLocalProduct(product, userId);
 }
 
 async function request<T>(url: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers);
-  if (!headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const response = await fetch(url, {
-    ...init,
-    headers
-  });
-  const body = (await response.json()) as { success: boolean; message?: string; data?: T };
-
-  if (!response.ok || !body.success) {
-    throw new Error(body.message ?? "Nao foi possivel acessar a API de produtos.");
-  }
-
-  return body.data as T;
+  return apiRequest<T>(url, init, "Nao foi possivel acessar a API de produtos.");
 }
 
 function toLocalProduct(product: RemoteProduct, fallbackUserId: string, fallbackListId?: string): Product {

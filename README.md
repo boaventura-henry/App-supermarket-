@@ -30,6 +30,7 @@ Arquivos principais:
 - `api/products`: endpoints serverless para gerenciamento de produtos via Prisma.
 - `api/price-history`: endpoints serverless para historico de precos via Prisma.
 - `api/migration/import-local-data.ts`: endpoint seguro para importar dados antigos do `localStorage`.
+- `api/me.ts`: endpoint de perfil autenticado via JWT Supabase.
 - `src/server/repositories/listRepository.ts`: operacoes Prisma para listas.
 - `src/server/services/listService.ts`: regras de negocio e validacoes da API de listas.
 - `src/server/repositories/productRepository.ts`: operacoes Prisma para produtos.
@@ -42,15 +43,22 @@ Arquivos principais:
 - `src/services/productApi.ts`: cliente `fetch` para CRUD remoto de produtos.
 - `src/services/priceHistoryApi.ts`: cliente `fetch` para historico remoto.
 - `src/services/migrationApi.ts`: cliente `fetch` para a ferramenta de importacao local.
+- `src/lib/supabaseClient.ts`: client Supabase Auth no frontend usando anon key publica.
+- `src/services/authService.ts`: camada de autenticacao Supabase Auth.
+- `src/services/apiClient.ts`: `fetch` autenticado com `Authorization: Bearer <token>`.
+- `src/server/auth/getAuthenticatedUser.ts`: validacao backend de JWT Supabase.
 
 Variaveis obrigatorias na Vercel:
 
 - `DATABASE_URL`: URL pooled do Supabase Postgres, usada pelo Prisma Client em runtime serverless.
 - `DIRECT_URL`: URL direta do Supabase Postgres, usada para migrations.
+- `VITE_SUPABASE_URL`: URL publica do projeto Supabase para o frontend.
+- `VITE_SUPABASE_ANON_KEY`: anon key publica do Supabase para Auth no frontend. Nunca use service role no frontend.
 - `VITE_USE_REMOTE_LISTS`: feature flag nao sensivel. Use `false` para manter `localStorage`; use `true` apenas quando a UI de listas for migrada para API.
 - `VITE_USE_REMOTE_PRODUCTS`: feature flag nao sensivel. Use `false` para manter produtos no `localStorage`; use `true` apenas quando o CRUD de produtos for migrado para API.
 - `VITE_USE_REMOTE_PRICE_HISTORY`: feature flag nao sensivel. Use `false` para manter historico no `localStorage`; use `true` quando Dashboard/Histórico forem alimentados pela API.
 - `VITE_ENABLE_LOCAL_DATA_MIGRATION`: feature flag nao sensivel. Use `false` para esconder a tela de importacao; use `true` para exibir a opcao "Migrar dados para nuvem" no menu.
+- `VITE_USE_SUPABASE_AUTH`: feature flag nao sensivel. Use `false` para manter login local temporario; use `true` para ativar Supabase Auth.
 
 Nao coloque valores reais no codigo. Use `.env.example` apenas como modelo e configure os valores reais em `Vercel > Project Settings > Environment Variables`.
 
@@ -169,6 +177,57 @@ Resumo retornado pela API:
 - passkeys importadas/ignoradas;
 - duplicados detectados;
 - avisos de normalizacao ou dados invalidos.
+
+## Supabase Auth - fase 6
+
+Esta fase adiciona Supabase Auth como fluxo principal de autenticacao quando `VITE_USE_SUPABASE_AUTH=true`, mantendo o login local como fallback temporario quando a flag esta desligada.
+
+Arquivos principais:
+
+- `src/lib/supabaseClient.ts`
+- `src/services/authService.ts`
+- `src/services/apiClient.ts`
+- `src/server/auth/getAuthenticatedUser.ts`
+- `api/me.ts`
+
+Fluxo implementado:
+
+- cadastro por e-mail e senha via Supabase Auth;
+- login por e-mail e senha via Supabase Auth;
+- persistencia de sessao pelo Supabase client;
+- logout via Supabase Auth;
+- recuperacao de senha por e-mail;
+- criacao/busca de `Profile` em `GET /api/me`;
+- criacao de usuario shadow na tabela `users` para manter as relacoes Prisma existentes;
+- chamadas frontend para listas, produtos, historico e migracao enviam `Authorization: Bearer <token>` quando ha sessao Supabase.
+
+APIs protegidas:
+
+- APIs de listas, produtos, historico e migracao preferem o usuario autenticado pelo JWT Supabase.
+- Sem header `Authorization`, elas ainda aceitam o `userId` antigo como compatibilidade temporaria.
+- Com token invalido, a API retorna `401`.
+- O endpoint `GET /api/me` e `PUT /api/me` exige JWT valido.
+
+Impacto no login antigo:
+
+- `VITE_USE_SUPABASE_AUTH=false`: fluxo antigo por `localStorage` continua funcionando.
+- `VITE_USE_SUPABASE_AUTH=true`: e-mail/senha usam Supabase Auth.
+- Dados antigos do `localStorage` nao sao apagados.
+- A importacao da Fase 5 pode ser usada apos login Supabase para vincular dados antigos ao usuario autenticado.
+
+Passkeys/biometria:
+
+- A biometria local continua como melhoria temporaria quando presente.
+- O app nao armazena biometria.
+- WebAuthn/passkeys frontend-only ainda nao substituem a autenticacao forte backend com challenge validado no servidor.
+- Supabase Auth por e-mail/senha e o fluxo principal nesta fase.
+
+Seguranca e RLS:
+
+- Nunca configure `SUPABASE_SERVICE_ROLE_KEY` no frontend.
+- Configure somente `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` no browser.
+- Habilite RLS no Supabase para tabelas publicas como `profiles`, `shopping_lists`, `products`, `price_history` e `passkey_credentials`.
+- Mesmo com Prisma no backend, RLS deve ficar preparado para a evolucao de seguranca.
 
 ## Por que Vite + React
 

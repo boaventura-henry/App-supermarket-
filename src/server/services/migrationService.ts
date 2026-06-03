@@ -84,7 +84,13 @@ type MigrationSummary = {
   duplicatesDetected: number;
 };
 
-export async function importLocalData(payload: unknown) {
+export type MigrationAuthUser = {
+  id: string;
+  email: string;
+  name: string;
+};
+
+export async function importLocalData(payload: unknown, authUser?: MigrationAuthUser | null) {
   const input = normalizePayload(payload);
   const warnings: string[] = [];
   const summary: MigrationSummary = {
@@ -102,12 +108,13 @@ export async function importLocalData(payload: unknown) {
   };
 
   return migrationRepository.runImportTransaction(async (client) => {
-    const user = await ensureUser(client, input.user, summary, warnings);
+    const sourceUserId = requireLocalId(input.user.uid);
+    const user = await ensureUser(client, input.user, summary, warnings, authUser);
     const listIdMap = new Map<string, string>();
     const productIdMap = new Map<string, string>();
 
     for (const item of input.lists) {
-      const normalized = normalizeList(item, user.legacyId ?? requireLocalId(input.user.uid), warnings);
+      const normalized = normalizeList(item, sourceUserId, warnings);
       if (!normalized) {
         summary.listsSkipped += 1;
         continue;
@@ -130,7 +137,7 @@ export async function importLocalData(payload: unknown) {
     }
 
     for (const item of input.products) {
-      const normalized = normalizeProduct(item, user.legacyId ?? requireLocalId(input.user.uid), listIdMap, warnings);
+      const normalized = normalizeProduct(item, sourceUserId, listIdMap, warnings);
       if (!normalized) {
         summary.productsSkipped += 1;
         continue;
@@ -162,7 +169,7 @@ export async function importLocalData(payload: unknown) {
     }
 
     for (const item of input.priceHistory) {
-      const normalized = normalizePriceHistory(item, user.legacyId ?? requireLocalId(input.user.uid), listIdMap, productIdMap, warnings);
+      const normalized = normalizePriceHistory(item, sourceUserId, listIdMap, productIdMap, warnings);
       if (!normalized) {
         summary.priceHistorySkipped += 1;
         continue;
@@ -193,7 +200,7 @@ export async function importLocalData(payload: unknown) {
     }
 
     for (const item of input.passkeys) {
-      const normalized = normalizePasskey(item, user.legacyId ?? requireLocalId(input.user.uid), user.email, warnings);
+      const normalized = normalizePasskey(item, sourceUserId, user.email, warnings);
       if (!normalized) {
         summary.passkeysSkipped += 1;
         continue;
@@ -247,10 +254,11 @@ async function ensureUser(
   client: Prisma.TransactionClient,
   user: LocalUser,
   summary: MigrationSummary,
-  warnings: string[]
+  warnings: string[],
+  authUser?: MigrationAuthUser | null
 ) {
-  const legacyId = requireLocalId(user.uid);
-  const email = normalizeEmail(user.email);
+  const legacyId = authUser ? authUser.id : requireLocalId(user.uid);
+  const email = authUser ? normalizeEmail(authUser.email) : normalizeEmail(user.email);
   const existing = await migrationRepository.findUser(client, legacyId, email);
   if (existing) {
     summary.userSkipped = 1;
@@ -270,7 +278,7 @@ async function ensureUser(
 
   const created = await migrationRepository.createUser(client, {
     legacyId,
-    name: normalizeName(user.name, "Usuario local"),
+    name: authUser?.name || normalizeName(user.name, "Usuario local"),
     email,
     passwordHash,
     securityAnswerHash,

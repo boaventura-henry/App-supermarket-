@@ -25,6 +25,16 @@ model User {
   @@map("users")
 }
 
+model Profile {
+  id        String   @id @db.Uuid
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("profiles")
+}
+
 model ShoppingList {
   id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   legacyId  String?        @unique

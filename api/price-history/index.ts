@@ -1,11 +1,13 @@
 import { getBody, getQueryParam, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../_utils";
+import { getAuthenticatedUserOrNull } from "../../src/server/auth/getAuthenticatedUser";
 import * as priceHistoryService from "../../src/server/services/priceHistoryService";
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
   try {
+    const authUser = await getAuthenticatedUserOrNull(request);
     if (request.method === "GET") {
       const history = await priceHistoryService.getPriceHistory({
-        userId: getQueryParam(request, "userId"),
+        userId: authUser?.id ?? getQueryParam(request, "userId"),
         productName: getQueryParam(request, "productName"),
         supermarket: getQueryParam(request, "supermarket"),
         brand: getQueryParam(request, "brand"),
@@ -17,7 +19,8 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     }
 
     if (request.method === "POST") {
-      const history = await priceHistoryService.createPriceHistory(getBody(request));
+      const body = getBody(request);
+      const history = await priceHistoryService.createPriceHistory({ ...body, userId: authUser?.id ?? body.userId });
       sendSuccess(response, 201, history, "Historico de precos criado");
       return;
     }

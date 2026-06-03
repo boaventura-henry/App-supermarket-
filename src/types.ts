@@ -7,6 +7,13 @@ export type User = {
   createdAt: number;
 };
 
+export type AppUser = {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: string;
+};
+
 export type PasskeyCredential = {
   id: string;
   userId: string;
