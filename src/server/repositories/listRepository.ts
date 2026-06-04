@@ -37,6 +37,7 @@ export async function findAllByUser(userId: string) {
       OR: [{ userId }, { sharedAccess: { some: { userId } } }]
     },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    take: 500,
     select: listSelect()
   });
 }
@@ -82,7 +83,7 @@ export async function update(id: string, userId: string, input: ListUpdateInput)
       userId,
       OR: idFilter(id)
     },
-    select: { id: true }
+    select: { id: true, name: true }
   });
 
   if (!existing) {

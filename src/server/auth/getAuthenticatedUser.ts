@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import type { ApiRequest } from "../../../api/_utils";
 import { AppError } from "../errors";
+import { getRequestContext, setRequestUser } from "../http/requestContext";
+import { enforceAuthenticatedRateLimit } from "../middleware/rateLimit";
 import { prisma } from "../prisma";
 
 export type AuthenticatedUser = {
@@ -42,12 +44,19 @@ export async function getAuthenticatedUser(request: ApiRequest): Promise<Authent
     throw new AppError(401, "Token Supabase invalido.");
   }
 
+  const rawName =
+    typeof data.user.user_metadata?.name === "string" ? data.user.user_metadata.name : data.user.email ?? "Usuario";
   const authenticatedUser = {
     id: data.user.id,
-    email: data.user.email ?? "",
-    name: typeof data.user.user_metadata?.name === "string" ? data.user.user_metadata.name : data.user.email ?? "Usuario"
+    email: (data.user.email ?? "").trim().toLowerCase().slice(0, 254),
+    name: rawName.trim().slice(0, 120) || "Usuario"
   };
   await ensureAppUser(authenticatedUser);
+  setRequestUser(authenticatedUser.id);
+  const context = getRequestContext();
+  if (context) {
+    enforceAuthenticatedRateLimit(context, authenticatedUser.id);
+  }
 
   return authenticatedUser;
 }

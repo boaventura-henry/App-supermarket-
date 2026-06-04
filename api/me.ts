@@ -1,8 +1,9 @@
 import { getAuthenticatedUser } from "../src/server/auth/getAuthenticatedUser";
 import { prisma } from "../src/server/prisma";
-import { getBody, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "./_utils";
+import { requireText } from "../src/server/validation/common";
+import { withApiHandler, getBody, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "./_utils";
 
-export default async function handler(request: ApiRequest, response: ApiResponse) {
+async function handler(request: ApiRequest, response: ApiResponse) {
   try {
     const authUser = await getAuthenticatedUser(request);
 
@@ -15,7 +16,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
 
     if (request.method === "PUT") {
       const body = getBody(request);
-      const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : authUser.name;
+      const name = body.name === undefined ? authUser.name : requireText(body.name, "Informe um nome valido.", 120);
       const profile = await upsertProfile(authUser.id, authUser.email, name);
       await ensureAppUser(authUser.id, authUser.email, profile.name ?? authUser.name);
       sendSuccess(response, 200, profile, "Perfil atualizado");
@@ -61,3 +62,5 @@ async function ensureAppUser(id: string, email: string, name: string) {
     }
   });
 }
+
+export default withApiHandler(handler);

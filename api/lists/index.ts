@@ -1,8 +1,8 @@
-import { getBody, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../_utils";
+import { withApiHandler, getBody, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../_utils";
 import { getAuthenticatedUser } from "../../src/server/auth/getAuthenticatedUser";
 import * as listService from "../../src/server/services/listService";
 
-export default async function handler(request: ApiRequest, response: ApiResponse) {
+async function handler(request: ApiRequest, response: ApiResponse) {
   try {
     const authUser = await getAuthenticatedUser(request);
     if (request.method === "GET") {
@@ -23,3 +23,5 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     sendError(response, error);
   }
 }
+
+export default withApiHandler(handler);

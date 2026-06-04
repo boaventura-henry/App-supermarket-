@@ -97,13 +97,14 @@ export async function findProductById(productId: string) {
   });
 }
 
-export async function findAllByUser(userId: string, filters: PriceHistoryFilters = {}) {
+export async function findAllByUser(userId: string, filters: PriceHistoryFilters = {}, limit = 500) {
   return prisma.priceHistory.findMany({
     where: {
       userId,
       ...buildFilterWhere(filters)
     },
     orderBy: { createdAt: "desc" },
+    take: limit,
     select: priceHistorySelect
   });
 }

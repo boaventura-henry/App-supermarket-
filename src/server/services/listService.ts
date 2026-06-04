@@ -1,6 +1,8 @@
 import { AppError } from "../errors";
 import * as listRepository from "../repositories/listRepository";
 import { requireListOwner } from "../auth/listPermissions";
+import { requireIdentifier, requireText } from "../validation/common";
+import { recordAudit } from "./auditLogService";
 
 export type ListPayload = {
   userId?: unknown;
@@ -15,7 +17,7 @@ export async function getLists(userId: unknown) {
 }
 
 export async function getList(id: unknown, userId: unknown) {
-  const listId = requireString(id, "Informe o id da lista.");
+  const listId = requireIdentifier(id, "Informe o id da lista.");
   const dbUser = await requireUser(userId);
   const list = await listRepository.findAccessibleById(listId, dbUser.id);
 
@@ -28,7 +30,7 @@ export async function getList(id: unknown, userId: unknown) {
 
 export async function createList(payload: ListPayload) {
   const dbUser = await requireUser(payload.userId);
-  const name = requireString(payload.name, "Informe o nome da lista.");
+  const name = requireText(payload.name, "Informe o nome da lista.", 120);
   const color = normalizeColor(payload.color);
 
   const list = await listRepository.create({
@@ -36,15 +38,23 @@ export async function createList(payload: ListPayload) {
     name,
     color
   });
+  await recordAudit({
+    userId: dbUser.id,
+    action: "LIST_CREATED",
+    entityType: "ShoppingList",
+    entityId: list.id,
+    listId: list.id,
+    metadata: { name: list.name, color: list.color }
+  });
   return mapList(list, dbUser.id);
 }
 
 export async function updateList(id: unknown, payload: ListPayload) {
-  const listId = requireString(id, "Informe o id da lista.");
+  const listId = requireIdentifier(id, "Informe o id da lista.");
   const dbUser = await requireUser(payload.userId);
   await requireListOwner(dbUser.id, listId);
   const data = {
-    ...(payload.name !== undefined ? { name: requireString(payload.name, "Informe o nome da lista.") } : {}),
+    ...(payload.name !== undefined ? { name: requireText(payload.name, "Informe o nome da lista.", 120) } : {}),
     ...(payload.color !== undefined ? { color: normalizeColor(payload.color) } : {})
   };
 
@@ -57,11 +67,19 @@ export async function updateList(id: unknown, payload: ListPayload) {
     throw new AppError(404, "Lista nao encontrada");
   }
 
+  await recordAudit({
+    userId: dbUser.id,
+    action: "LIST_UPDATED",
+    entityType: "ShoppingList",
+    entityId: list.id,
+    listId: list.id,
+    metadata: { fields: Object.keys(data) }
+  });
   return mapList(list, dbUser.id);
 }
 
 export async function deleteList(id: unknown, userId: unknown) {
-  const listId = requireString(id, "Informe o id da lista.");
+  const listId = requireIdentifier(id, "Informe o id da lista.");
   const dbUser = await requireUser(userId);
   await requireListOwner(dbUser.id, listId);
   const removed = await listRepository.remove(listId, dbUser.id);
@@ -70,6 +88,13 @@ export async function deleteList(id: unknown, userId: unknown) {
     throw new AppError(404, "Lista nao encontrada");
   }
 
+  await recordAudit({
+    userId: dbUser.id,
+    action: "LIST_DELETED",
+    entityType: "ShoppingList",
+    entityId: removed.id,
+    metadata: { name: removed.name }
+  });
   return { id: removed.id };
 }
 
@@ -92,7 +117,7 @@ function mapList(list: Awaited<ReturnType<typeof listRepository.findAllByUser>>[
 }
 
 async function requireUser(userId: unknown) {
-  const id = requireString(userId, "Informe o userId.");
+  const id = requireIdentifier(userId, "Informe o userId.");
   const user = await listRepository.findUserByIdOrLegacyId(id);
 
   if (!user) {
@@ -102,20 +127,12 @@ async function requireUser(userId: unknown) {
   return user;
 }
 
-function requireString(value: unknown, message: string) {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new AppError(400, message);
-  }
-
-  return value.trim();
-}
-
 function normalizeColor(value: unknown) {
   if (value === undefined || value === null || value === "") {
     return "#6df7a7";
   }
 
-  const color = requireString(value, "Informe uma cor valida.");
+  const color = requireText(value, "Informe uma cor valida.", 7);
   if (!/^#[0-9a-f]{6}$/i.test(color)) {
     throw new AppError(400, "Informe uma cor hexadecimal valida.");
   }

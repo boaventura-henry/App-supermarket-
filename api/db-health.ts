@@ -1,29 +1,20 @@
+import { getAuthenticatedUser } from "../src/server/auth/getAuthenticatedUser";
 import { prisma } from "../src/server/prisma";
+import { methodNotAllowed, sendError, sendSuccess, withApiHandler, type ApiRequest, type ApiResponse } from "./_utils";
 
-type ApiRequest = {
-  method?: string;
-};
-
-type ApiResponse = {
-  status: (code: number) => ApiResponse;
-  json: (body: unknown) => void;
-  setHeader: (name: string, value: string) => void;
-};
-
-export default async function handler(request: ApiRequest, response: ApiResponse) {
+async function handler(request: ApiRequest, response: ApiResponse) {
   if (request.method !== "GET") {
-    response.setHeader("Allow", "GET");
-    response.status(405).json({ ok: false, error: "Method not allowed" });
+    methodNotAllowed(response, ["GET"]);
     return;
   }
 
   try {
+    await getAuthenticatedUser(request);
     await prisma.$queryRaw`SELECT 1`;
-    response.status(200).json({ ok: true, database: "supabase-postgres" });
+    sendSuccess(response, 200, { database: "supabase-postgres" });
   } catch (error) {
-    response.status(500).json({
-      ok: false,
-      error: error instanceof Error ? error.message : "Database health check failed"
-    });
+    sendError(response, error);
   }
 }
+
+export default withApiHandler(handler);

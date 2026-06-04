@@ -3,6 +3,7 @@ import { resolveUserId } from "../auth/listPermissions";
 import { AppError } from "../errors";
 import * as notificationRepository from "../repositories/notificationRepository";
 import type { NotificationRecord } from "../repositories/notificationRepository";
+import { parsePageLimit, requireIdentifier } from "../validation/common";
 
 export type NotificationPayload = {
   type: NotificationType;
@@ -11,9 +12,9 @@ export type NotificationPayload = {
   metadata?: Prisma.InputJsonValue;
 };
 
-export async function getNotifications(userId: unknown) {
-  const user = await resolveUserId(requireString(userId, "Informe o userId."));
-  const notifications = await notificationRepository.findAllByUser(user.id);
+export async function getNotifications(userId: unknown, limit?: unknown) {
+  const user = await resolveUserId(requireIdentifier(userId, "Informe o userId."));
+  const notifications = await notificationRepository.findAllByUser(user.id, parsePageLimit(limit, 100, 200));
   return notifications.map(mapNotification);
 }
 
@@ -28,8 +29,8 @@ export async function createNotification(userId: string, payload: NotificationPa
 }
 
 export async function markAsRead(id: unknown, userId: unknown) {
-  const notificationId = requireString(id, "Informe o id da notificacao.");
-  const user = await resolveUserId(requireString(userId, "Informe o userId."));
+  const notificationId = requireIdentifier(id, "Informe o id da notificacao.");
+  const user = await resolveUserId(requireIdentifier(userId, "Informe o userId."));
   const notification = await notificationRepository.markAsRead(notificationId, user.id);
 
   if (!notification) {
@@ -40,7 +41,7 @@ export async function markAsRead(id: unknown, userId: unknown) {
 }
 
 export async function markAllAsRead(userId: unknown) {
-  const user = await resolveUserId(requireString(userId, "Informe o userId."));
+  const user = await resolveUserId(requireIdentifier(userId, "Informe o userId."));
   return notificationRepository.markAllAsRead(user.id);
 }
 
@@ -55,11 +56,4 @@ function mapNotification(notification: NotificationRecord) {
     metadata: notification.metadata,
     createdAt: notification.createdAt.toISOString()
   };
-}
-
-function requireString(value: unknown, message: string) {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new AppError(400, message);
-  }
-  return value.trim();
 }

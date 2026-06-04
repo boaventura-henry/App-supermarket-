@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { AppError } from "../errors";
 import * as priceHistoryRepository from "../repositories/priceHistoryRepository";
 import type { PriceHistoryCreateInput, PriceHistoryRecord } from "../repositories/priceHistoryRepository";
+import { optionalText, parsePageLimit, requireIdentifier, requireText } from "../validation/common";
 
 export type PriceHistoryPayload = {
   userId?: unknown;
@@ -22,6 +23,7 @@ export type PriceHistoryQuery = {
   brand?: unknown;
   monthStart?: unknown;
   monthEnd?: unknown;
+  limit?: unknown;
 };
 
 export async function getPriceHistory(query: PriceHistoryQuery) {
@@ -32,12 +34,12 @@ export async function getPriceHistory(query: PriceHistoryQuery) {
     brand: optionalString(query.brand),
     ...parseMonthRange(query.monthStart, query.monthEnd)
   };
-  const history = await priceHistoryRepository.findAllByUser(user.id, filters);
+  const history = await priceHistoryRepository.findAllByUser(user.id, filters, parsePageLimit(query.limit, 500, 1_000));
   return history.map(mapPriceHistory);
 }
 
 export async function getPriceHistoryRecord(id: unknown, userId: unknown) {
-  const historyId = requireString(id, "Informe o id do historico.");
+  const historyId = requireIdentifier(id, "Informe o id do historico.");
   const user = await requireUser(userId);
   const history = await priceHistoryRepository.findById(historyId, user.id);
 
@@ -59,7 +61,7 @@ export async function createPriceHistory(payload: PriceHistoryPayload) {
     listId,
     productId,
     productName: normalizeProductName(payload.productName),
-    brand: normalizeOptionalString(payload.brand),
+    brand: optionalText(payload.brand, "Informe uma marca valida.", 120),
     supermarket: normalizeSupermarket(payload.supermarket),
     quantity: parseOptionalDecimal(payload.quantity, "Informe uma quantidade valida ou deixe em branco.", 3),
     price,
@@ -70,7 +72,7 @@ export async function createPriceHistory(payload: PriceHistoryPayload) {
 }
 
 export async function deletePriceHistory(id: unknown, userId: unknown) {
-  const historyId = requireString(id, "Informe o id do historico.");
+  const historyId = requireIdentifier(id, "Informe o id do historico.");
   const user = await requireUser(userId);
   const removed = await priceHistoryRepository.remove(historyId, user.id);
 
@@ -119,7 +121,7 @@ function mapPriceHistory(history: PriceHistoryRecord) {
 }
 
 async function requireUser(userId: unknown) {
-  const id = requireString(userId, "Informe o userId.");
+  const id = requireIdentifier(userId, "Informe o userId.");
   const user = await priceHistoryRepository.findUserByIdOrLegacyId(id);
 
   if (!user) {
@@ -163,28 +165,22 @@ async function resolveOptionalProductId(value: unknown, userId: string) {
   return product.id;
 }
 
-function requireString(value: unknown, message: string) {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new AppError(400, message);
-  }
-
-  return value.trim();
-}
-
 function optionalString(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  return requireText(value, "Informe um filtro valido.", 160);
 }
 
 function normalizeProductName(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : "Produto sem nome";
-}
-
-function normalizeOptionalString(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
+  return value === undefined || value === null || value === ""
+    ? "Produto sem nome"
+    : requireText(value, "Informe um nome de produto valido.", 160);
 }
 
 function normalizeSupermarket(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : "Sem supermercado";
+  const supermarket = optionalText(value, "Informe um supermercado valido.", 120);
+  return supermarket || "Sem supermercado";
 }
 
 function parseRequiredPositiveDecimal(value: unknown, message: string) {
@@ -208,7 +204,7 @@ function parseOptionalDecimal(value: unknown, message: string, decimalPlaces: nu
 
   const normalized = rawValue.includes(",") ? rawValue.replace(/\./g, "").replace(",", ".") : rawValue;
   const parsed = Number(normalized);
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 999_999_999) {
     throw new AppError(400, message);
   }
 

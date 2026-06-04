@@ -90,6 +90,7 @@ model SharedListAccess {
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([listId, userId])
+  @@index([listId])
   @@index([userId])
   @@map("shared_list_access")
 }
@@ -113,6 +114,7 @@ model ListInvite {
   @@index([listId, status])
   @@index([invitedEmail, status])
   @@index([invitedUserId, status])
+  @@index([status])
   @@map("list_invites")
 }
 
@@ -136,6 +138,8 @@ model Product {
 
   @@index([userId])
   @@index([listId, purchased, sortOrder], map: "products_listId_isBought_sortOrder_idx")
+  @@index([purchased])
+  @@index([sortOrder])
   @@map("products")
 }
 
@@ -156,6 +160,9 @@ model PriceHistory {
   product     Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt], map: "price_history_userId_recordedAt_idx")
+  @@index([productName])
+  @@index([supermarket])
+  @@index([createdAt])
   @@index([listId])
   @@index([productId])
   @@map("price_history")
@@ -190,4 +197,22 @@ model PasskeyCredential {
   @@unique([userId, rawId])
   @@index([userId])
   @@map("passkey_credentials")
+}
+
+model AuditLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String   @db.Uuid
+  action     String
+  entityType String
+  entityId   String
+  listId     String?  @db.Uuid
+  metadata   Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([listId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
 }

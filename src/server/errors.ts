@@ -14,7 +14,7 @@ export function toErrorResponse(error: unknown) {
       statusCode: error.statusCode,
       body: {
         success: false,
-        message: error.message
+        message: error.statusCode >= 500 ? "Nao foi possivel concluir a operacao agora." : error.message
       }
     };
   }
@@ -23,7 +23,7 @@ export function toErrorResponse(error: unknown) {
     statusCode: 500,
     body: {
       success: false,
-      message: error instanceof Error ? error.message : "Erro interno do servidor"
+      message: "Erro interno do servidor"
     }
   };
 }

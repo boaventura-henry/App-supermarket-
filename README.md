@@ -448,3 +448,129 @@ $env:NETLIFY_SITE_ID="site-id-do-supermarketjon"
 - `concurrency` evita deploys simultaneos da mesma branch.
 - Lint e build bloqueiam deploy quebrado.
 - Headers de seguranca e cache de assets estao no `netlify.toml`.
+
+## Fase 9: hardening de producao
+
+Esta fase adiciona protecoes compartilhadas a todas as APIs serverless:
+
+- autenticacao Supabase validada no backend com `auth.getUser(token)`;
+- ownership e roles `OWNER`, `EDITOR` e `VIEWER` validados antes de acessar listas;
+- `requestId` gerado ou reaproveitado de `x-request-id`, retornado no header e no JSON;
+- erros internos sanitizados, sem stack trace, SQL ou connection string na resposta;
+- logs JSON com endpoint, metodo, status, duracao, requestId e userId autenticado;
+- redacao defensiva de campos com nomes sensiveis nos logs;
+- payload JSON limitado a 256 KiB e validadores reutilizaveis para textos, e-mails e limites;
+- rate limit temporario por IP e usuario autenticado;
+- `AuditLog` para alteracoes importantes;
+- limites de consulta para listas, produtos, historico, convites e notificacoes;
+- Error Boundary no React para evitar tela branca em falhas inesperadas.
+
+### Variaveis na Vercel
+
+Publicas, incluidas no bundle do navegador:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_USE_SUPABASE_AUTH`
+- `VITE_USE_REMOTE_LISTS`
+- `VITE_USE_REMOTE_PRODUCTS`
+- `VITE_USE_REMOTE_PRICE_HISTORY`
+- `VITE_ENABLE_LOCAL_DATA_MIGRATION`
+
+Privadas, configuradas somente em Vercel Project Settings > Environment Variables:
+
+- `DATABASE_URL`: URL do pooler Supabase usada pelo Prisma em runtime serverless.
+- `DIRECT_URL`: conexao direta usada por migrations.
+- `SUPABASE_URL`: URL usada pela validacao de sessao no backend.
+- `SUPABASE_ANON_KEY`: anon key usada pelo backend para chamar `auth.getUser`.
+
+`SUPABASE_SERVICE_ROLE_KEY` e `SUPABASE_JWT_SECRET` nao sao usados atualmente. Nunca exponha service role em variavel `VITE_*`.
+
+### Rate limit
+
+O fallback atual usa memoria da instancia serverless:
+
+- leitura: ate 240 requisicoes por minuto por IP;
+- escrita: ate 90 requisicoes por minuto por IP;
+- convites e importacao: ate 15 requisicoes por minuto por IP;
+- usuario autenticado recebe um limite adicional separado.
+
+Esse fallback protege contra abuso simples, mas nao compartilha contadores entre instancias Vercel. Antes de alto volume, substitua por armazenamento distribuido, como Upstash Redis, mantendo a mesma interface de middleware.
+
+### Auditoria e logs
+
+O model `AuditLog` registra acao, usuario, entidade, lista opcional, metadata segura, IP, user-agent e data. Sao auditadas criacao/edicao/exclusao de listas e produtos, compra/descompra, compartilhamentos, convites e importacoes.
+
+Auditoria nao armazena senha, token, authorization header, connection string ou service role. Nao existe tela publica de auditoria; uma tela administrativa com controle de acesso fica para fase futura.
+
+### Migrations
+
+Desenvolvimento:
+
+```bash
+npx prisma validate
+npx prisma migrate dev
+```
+
+Producao/Vercel:
+
+```bash
+npx prisma migrate deploy
+```
+
+Nunca use `prisma db push` em producao. Revise migrations destrutivas e confirme backup antes do deploy. O PrismaClient fica em singleton compartilhado para reduzir conexoes em serverless.
+
+### Backup
+
+Verifique backups automaticos e retencao no painel Supabase. O procedimento de export manual e restore isolado esta em `scripts/backup-db.md`.
+
+### RLS recomendada
+
+Mesmo que o Prisma acesse o banco pelo backend, RLS deve ser mantida como defesa extra:
+
+- `profiles`: usuario le/edita apenas `id = auth.uid()`;
+- `shopping_lists`: dono acessa a propria lista; compartilhados podem visualizar;
+- `products`: owner/editor alteram; viewer somente visualiza;
+- `price_history`: apenas o usuario dono dos registros;
+- `shared_list_access`: usuario acessa seus registros ou o dono gerencia acessos da lista;
+- `list_invites`: convidado ou dono da lista;
+- `notifications`: somente `userId = auth.uid()`;
+- `audit_logs`: sem acesso direto pelo frontend;
+- `realtime.messages`: somente autenticados e, idealmente, autorizados para o topico da lista.
+
+O Realtime envia apenas `listId` e tipo do evento. Ao receber evento, o frontend recarrega dados pela API protegida, usa debounce e remove a subscription ao sair da lista.
+
+### Troubleshooting
+
+- `401`: confirme sessao Supabase e as variaveis `SUPABASE_URL`/`SUPABASE_ANON_KEY`.
+- `403`: confirme ownership ou role do compartilhamento.
+- `429`: aguarde um minuto; verifique chamadas repetidas no frontend.
+- `500`: use o `requestId` retornado para localizar o log JSON na Vercel.
+- erro Prisma de conexao: confirme `DATABASE_URL` do pooler e `DIRECT_URL` direta.
+- migration pendente: execute `npx prisma migrate deploy` no ambiente correto.
+
+### Checklist antes de merge na main
+
+- [ ] `npm run lint`
+- [ ] `npm run build`
+- [ ] `npx prisma validate`
+- [ ] `npx prisma migrate deploy` testado em ambiente separado
+- [ ] variaveis publicas e privadas configuradas na Vercel
+- [ ] Supabase Auth configurado
+- [ ] RLS revisado
+- [ ] backup e restore isolado revisados
+- [ ] API sem token retorna `401`
+- [ ] usuario sem permissao recebe `403`
+- [ ] payload invalido recebe `400`
+- [ ] erro interno nao vaza stack trace e retorna `requestId`
+- [ ] login, lista, produto e importacao testados
+- [ ] compartilhamento, convite, notificacao e realtime testados
+- [ ] historico e dashboard testados
+- [ ] mobile e modo escuro testados
+
+### Limitacoes conhecidas
+
+- O rate limit em memoria nao e global entre instancias serverless.
+- Nao existe painel administrativo para consultar `AuditLog`.
+- Backup/restore dependem dos recursos do plano Supabase e de procedimento operacional.
+- Testes de integracao de APIs protegidas exigem ambiente Supabase separado com tokens de teste.

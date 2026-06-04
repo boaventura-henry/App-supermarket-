@@ -96,6 +96,7 @@ export async function findAllByList(listId: string) {
   return prisma.product.findMany({
     where: { listId },
     orderBy: [{ purchased: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+    take: 2_000,
     select: productSelect
   });
 }

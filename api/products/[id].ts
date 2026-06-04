@@ -1,8 +1,8 @@
-import { getBody, getQueryParam, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../_utils";
+import { withApiHandler, getBody, getQueryParam, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../_utils";
 import { getAuthenticatedUser } from "../../src/server/auth/getAuthenticatedUser";
 import * as productService from "../../src/server/services/productService";
 
-export default async function handler(request: ApiRequest, response: ApiResponse) {
+async function handler(request: ApiRequest, response: ApiResponse) {
   const id = getQueryParam(request, "id");
 
   try {
@@ -25,3 +25,5 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     sendError(response, error);
   }
 }
+
+export default withApiHandler(handler);

@@ -1,8 +1,8 @@
 import { getAuthenticatedUser } from "../../../src/server/auth/getAuthenticatedUser";
 import * as inviteService from "../../../src/server/services/inviteService";
-import { getBody, getQueryParam, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../../_utils";
+import { withApiHandler, getBody, getQueryParam, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../../_utils";
 
-export default async function handler(request: ApiRequest, response: ApiResponse) {
+async function handler(request: ApiRequest, response: ApiResponse) {
   const listId = getQueryParam(request, "listId");
 
   try {
@@ -25,3 +25,5 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     sendError(response, error);
   }
 }
+
+export default withApiHandler(handler);

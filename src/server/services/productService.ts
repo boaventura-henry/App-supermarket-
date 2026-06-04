@@ -4,6 +4,8 @@ import { createAutoPriceHistory } from "./priceHistoryService";
 import { requireListEditor, requireListViewer } from "../auth/listPermissions";
 import * as productRepository from "../repositories/productRepository";
 import type { ListRecord, ProductRecord, ProductUpdateInput } from "../repositories/productRepository";
+import { optionalText, requireIdentifier, requireText } from "../validation/common";
+import { recordAudit } from "./auditLogService";
 
 export type ProductPayload = {
   userId?: unknown;
@@ -28,7 +30,7 @@ export async function createProduct(listId: unknown, payload: ProductPayload) {
   const user = await requireUser(payload.userId);
   const list = await requireList(listId);
   await requireListEditor(user.id, list.id);
-  const name = requireString(payload.name, "Informe a descricao do produto.");
+  const name = requireText(payload.name, "Informe a descricao do produto.", 160);
   const quantity = parseOptionalDecimal(payload.quantity, "Informe uma quantidade valida ou deixe em branco.", 3);
   const unitPrice = parseOptionalDecimal(payload.unitPrice, "Informe um valor unitario valido ou deixe em branco.", 2);
   const sortOrder = await productRepository.nextSortOrder(list.id);
@@ -37,10 +39,10 @@ export async function createProduct(listId: unknown, payload: ProductPayload) {
     userId: user.id,
     listId: list.id,
     name,
-    brand: normalizeOptionalString(payload.brand),
+    brand: optionalText(payload.brand, "Informe uma marca valida.", 120),
     quantity,
     unitPrice,
-    supermarket: normalizeOptionalString(payload.supermarket),
+    supermarket: optionalText(payload.supermarket, "Informe um supermercado valido.", 120),
     sortOrder
   });
 
@@ -57,21 +59,29 @@ export async function createProduct(listId: unknown, payload: ProductPayload) {
     });
   }
 
+  await recordAudit({
+    userId: user.id,
+    action: "PRODUCT_CREATED",
+    entityType: "Product",
+    entityId: product.id,
+    listId: product.listId,
+    metadata: { name: product.name }
+  });
   return mapProduct(product);
 }
 
 export async function updateProduct(id: unknown, payload: ProductPayload) {
-  const productId = requireString(id, "Informe o id do produto.");
+  const productId = requireIdentifier(id, "Informe o id do produto.");
   const user = await requireUser(payload.userId);
   const current = await requireProductEditor(productId, user.id);
   validateExpectedUpdatedAt(payload.expectedUpdatedAt, current.updatedAt);
   const data: ProductUpdateInput = {};
 
   if (payload.name !== undefined) {
-    data.name = requireString(payload.name, "Informe a descricao do produto.");
+    data.name = requireText(payload.name, "Informe a descricao do produto.", 160);
   }
   if (payload.brand !== undefined) {
-    data.brand = normalizeOptionalString(payload.brand);
+    data.brand = optionalText(payload.brand, "Informe uma marca valida.", 120);
   }
   if (payload.quantity !== undefined) {
     data.quantity = parseOptionalDecimal(payload.quantity, "Informe uma quantidade valida ou deixe em branco.", 3);
@@ -80,7 +90,7 @@ export async function updateProduct(id: unknown, payload: ProductPayload) {
     data.unitPrice = parseOptionalDecimal(payload.unitPrice, "Informe um valor unitario valido ou deixe em branco.", 2);
   }
   if (payload.supermarket !== undefined) {
-    data.supermarket = normalizeOptionalString(payload.supermarket);
+    data.supermarket = optionalText(payload.supermarket, "Informe um supermercado valido.", 120);
   }
 
   if (Object.keys(data).length === 0) {
@@ -107,28 +117,51 @@ export async function updateProduct(id: unknown, payload: ProductPayload) {
     });
   }
 
+  await recordAudit({
+    userId: user.id,
+    action: "PRODUCT_UPDATED",
+    entityType: "Product",
+    entityId: updated.id,
+    listId: updated.listId,
+    metadata: { fields: Object.keys(data) }
+  });
   return mapProduct(updated);
 }
 
 export async function deleteProduct(id: unknown, userId: unknown) {
-  const productId = requireString(id, "Informe o id do produto.");
+  const productId = requireIdentifier(id, "Informe o id do produto.");
   const user = await requireUser(userId);
   const product = await requireProductEditor(productId, user.id);
   await productRepository.remove(product.id);
+  await recordAudit({
+    userId: user.id,
+    action: "PRODUCT_DELETED",
+    entityType: "Product",
+    entityId: product.id,
+    listId: product.listId,
+    metadata: { name: product.name }
+  });
   return { id: product.id };
 }
 
 export async function updatePurchasedStatus(id: unknown, payload: ProductPayload) {
-  const productId = requireString(id, "Informe o id do produto.");
+  const productId = requireIdentifier(id, "Informe o id do produto.");
   const user = await requireUser(payload.userId);
   const product = await requireProductEditor(productId, user.id);
   const purchased = requireBoolean(payload.purchased, "Informe o status de comprado.");
   const updated = await productRepository.updatePurchasedStatus(product.id, purchased);
+  await recordAudit({
+    userId: user.id,
+    action: purchased ? "PRODUCT_PURCHASED" : "PRODUCT_UNPURCHASED",
+    entityType: "Product",
+    entityId: updated.id,
+    listId: updated.listId
+  });
   return mapProduct(updated);
 }
 
 async function requireUser(userId: unknown) {
-  const id = requireString(userId, "Informe o userId.");
+  const id = requireIdentifier(userId, "Informe o userId.");
   const user = await productRepository.findUserByIdOrLegacyId(id);
 
   if (!user) {
@@ -139,7 +172,7 @@ async function requireUser(userId: unknown) {
 }
 
 async function requireList(listId: unknown): Promise<ListRecord> {
-  const id = requireString(listId, "Informe o id da lista.");
+  const id = requireIdentifier(listId, "Informe o id da lista.");
   const list = await productRepository.findListById(id);
 
   if (!list) {
@@ -159,24 +192,12 @@ async function requireProductEditor(productId: string, userId: string) {
   return product;
 }
 
-function requireString(value: unknown, message: string) {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new AppError(400, message);
-  }
-
-  return value.trim();
-}
-
 function requireBoolean(value: unknown, message: string) {
   if (typeof value !== "boolean") {
     throw new AppError(400, message);
   }
 
   return value;
-}
-
-function normalizeOptionalString(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 function parseOptionalDecimal(value: unknown, message: string, decimalPlaces: number) {
@@ -191,7 +212,7 @@ function parseOptionalDecimal(value: unknown, message: string, decimalPlaces: nu
 
   const normalized = rawValue.includes(",") ? rawValue.replace(/\./g, "").replace(",", ".") : rawValue;
   const parsed = Number(normalized);
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 999_999_999) {
     throw new AppError(400, message);
   }
 

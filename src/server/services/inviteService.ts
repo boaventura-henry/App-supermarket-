@@ -1,8 +1,12 @@
+import { randomUUID } from "node:crypto";
 import type { ListAccessRole } from "@prisma/client";
 import { requireListOwner, resolveUserId } from "../auth/listPermissions";
 import { AppError } from "../errors";
+import { isUniqueConstraintError } from "../prismaErrors";
 import * as inviteRepository from "../repositories/inviteRepository";
 import type { InviteRecord } from "../repositories/inviteRepository";
+import { requireEmail, requireIdentifier } from "../validation/common";
+import { recordAudit } from "./auditLogService";
 import { createNotification } from "./notificationService";
 
 export type InvitePayload = {
@@ -12,20 +16,20 @@ export type InvitePayload = {
 };
 
 export async function getMyInvites(userId: unknown) {
-  const user = await resolveUserId(requireString(userId, "Informe o userId."));
+  const user = await resolveUserId(requireIdentifier(userId, "Informe o userId."));
   const invites = await inviteRepository.findPendingForUser(user.id, user.email.toLowerCase());
   return invites.map(mapInvite);
 }
 
 export async function getListInvites(listId: unknown, userId: unknown) {
-  const currentUser = await resolveUserId(requireString(userId, "Informe o userId."));
+  const currentUser = await resolveUserId(requireIdentifier(userId, "Informe o userId."));
   const list = await requireOwnedList(listId, currentUser.id);
   const invites = await inviteRepository.findAllForList(list.id);
   return invites.map(mapInvite);
 }
 
 export async function createInvite(listId: unknown, payload: InvitePayload) {
-  const currentUser = await resolveUserId(requireString(payload.userId, "Informe o userId."));
+  const currentUser = await resolveUserId(requireIdentifier(payload.userId, "Informe o userId."));
   const list = await requireOwnedList(listId, currentUser.id);
   const invitedEmail = requireEmail(payload.email);
   const role = normalizeRole(payload.role);
@@ -49,15 +53,23 @@ export async function createInvite(listId: unknown, payload: InvitePayload) {
     throw new AppError(400, "Ja existe um convite pendente para este e-mail.");
   }
 
-  const invite = await inviteRepository.create({
-    listId: list.id,
-    invitedEmail,
-    invitedUserId: targetUser?.id ?? null,
-    invitedByUserId: currentUser.id,
-    role,
-    token: createInviteToken(),
-    expiresAt: null
-  });
+  let invite: InviteRecord;
+  try {
+    invite = await inviteRepository.create({
+      listId: list.id,
+      invitedEmail,
+      invitedUserId: targetUser?.id ?? null,
+      invitedByUserId: currentUser.id,
+      role,
+      token: createInviteToken(),
+      expiresAt: null
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw new AppError(409, "Ja existe um convite pendente para este e-mail.");
+    }
+    throw error;
+  }
 
   if (targetUser) {
     await createNotification(targetUser.id, {
@@ -68,11 +80,19 @@ export async function createInvite(listId: unknown, payload: InvitePayload) {
     });
   }
 
+  await recordAudit({
+    userId: currentUser.id,
+    action: "INVITE_CREATED",
+    entityType: "ListInvite",
+    entityId: invite.id,
+    listId: list.id,
+    metadata: { role, invitedEmailDomain: invitedEmail.split("@")[1] ?? "" }
+  });
   return mapInvite(invite);
 }
 
 export async function acceptInvite(inviteId: unknown, userId: unknown) {
-  const currentUser = await resolveUserId(requireString(userId, "Informe o userId."));
+  const currentUser = await resolveUserId(requireIdentifier(userId, "Informe o userId."));
   const invite = await requirePendingInviteForUser(inviteId, currentUser.id, currentUser.email);
   const accepted = await inviteRepository.acceptInvite(invite.id, currentUser.id, invite.role);
 
@@ -87,11 +107,18 @@ export async function acceptInvite(inviteId: unknown, userId: unknown) {
     metadata: { inviteId: invite.id, listId: invite.list.legacyId ?? invite.listId }
   });
 
+  await recordAudit({
+    userId: currentUser.id,
+    action: "INVITE_ACCEPTED",
+    entityType: "ListInvite",
+    entityId: invite.id,
+    listId: invite.listId
+  });
   return mapInvite(accepted);
 }
 
 export async function declineInvite(inviteId: unknown, userId: unknown) {
-  const currentUser = await resolveUserId(requireString(userId, "Informe o userId."));
+  const currentUser = await resolveUserId(requireIdentifier(userId, "Informe o userId."));
   const invite = await requirePendingInviteForUser(inviteId, currentUser.id, currentUser.email);
   const declined = await inviteRepository.updateStatus(invite.id, "DECLINED", currentUser.id);
 
@@ -102,11 +129,18 @@ export async function declineInvite(inviteId: unknown, userId: unknown) {
     metadata: { inviteId: invite.id, listId: invite.list.legacyId ?? invite.listId }
   });
 
+  await recordAudit({
+    userId: currentUser.id,
+    action: "INVITE_DECLINED",
+    entityType: "ListInvite",
+    entityId: invite.id,
+    listId: invite.listId
+  });
   return mapInvite(declined);
 }
 
 export async function cancelInvite(inviteId: unknown, userId: unknown) {
-  const currentUser = await resolveUserId(requireString(userId, "Informe o userId."));
+  const currentUser = await resolveUserId(requireIdentifier(userId, "Informe o userId."));
   const invite = await requireInvite(inviteId);
   await requireListOwner(currentUser.id, invite.listId);
 
@@ -124,11 +158,18 @@ export async function cancelInvite(inviteId: unknown, userId: unknown) {
     });
   }
 
+  await recordAudit({
+    userId: currentUser.id,
+    action: "INVITE_CANCELED",
+    entityType: "ListInvite",
+    entityId: invite.id,
+    listId: invite.listId
+  });
   return mapInvite(canceled);
 }
 
 async function requireOwnedList(listId: unknown, userId: string) {
-  const id = requireString(listId, "Informe o id da lista.");
+  const id = requireIdentifier(listId, "Informe o id da lista.");
   const list = await inviteRepository.findListById(id);
   if (!list) {
     throw new AppError(404, "Lista nao encontrada.");
@@ -138,7 +179,7 @@ async function requireOwnedList(listId: unknown, userId: string) {
 }
 
 async function requireInvite(inviteId: unknown) {
-  const id = requireString(inviteId, "Informe o id do convite.");
+  const id = requireIdentifier(inviteId, "Informe o id do convite.");
   const invite = await inviteRepository.findById(id);
   if (!invite) {
     throw new AppError(404, "Convite nao encontrado.");
@@ -191,21 +232,6 @@ function normalizeRole(value: unknown): ListAccessRole {
   throw new AppError(400, "Informe uma permissao valida.");
 }
 
-function requireEmail(value: unknown) {
-  const email = requireString(value, "Informe o e-mail do usuario.").toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new AppError(400, "Informe um e-mail valido.");
-  }
-  return email;
-}
-
-function requireString(value: unknown, message: string) {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new AppError(400, message);
-  }
-  return value.trim();
-}
-
 function createInviteToken() {
-  return `inv_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
+  return `inv_${randomUUID().replace(/-/g, "")}`;
 }

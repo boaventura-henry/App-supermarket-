@@ -109,6 +109,7 @@ export async function findAllForList(listId: string) {
   return prisma.listInvite.findMany({
     where: { listId },
     orderBy: { createdAt: "desc" },
+    take: 100,
     select: inviteSelect
   });
 }
@@ -120,6 +121,7 @@ export async function findPendingForUser(userId: string, email: string) {
       OR: [{ invitedUserId: userId }, { invitedEmail: email }]
     },
     orderBy: { createdAt: "desc" },
+    take: 100,
     select: inviteSelect
   });
 }

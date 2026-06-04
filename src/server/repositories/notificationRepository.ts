@@ -22,11 +22,11 @@ export type NotificationCreateInput = {
   metadata?: Prisma.InputJsonValue;
 };
 
-export async function findAllByUser(userId: string) {
+export async function findAllByUser(userId: string, limit = 100) {
   return prisma.notification.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
-    take: 100,
+    take: limit,
     select: notificationSelect
   });
 }

@@ -1,8 +1,8 @@
-import { getBody, getQueryParam, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../_utils";
+import { withApiHandler, getBody, getQueryParam, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../_utils";
 import { getAuthenticatedUser } from "../../src/server/auth/getAuthenticatedUser";
 import * as priceHistoryService from "../../src/server/services/priceHistoryService";
 
-export default async function handler(request: ApiRequest, response: ApiResponse) {
+async function handler(request: ApiRequest, response: ApiResponse) {
   try {
     const authUser = await getAuthenticatedUser(request);
     if (request.method === "GET") {
@@ -12,7 +12,8 @@ export default async function handler(request: ApiRequest, response: ApiResponse
         supermarket: getQueryParam(request, "supermarket"),
         brand: getQueryParam(request, "brand"),
         monthStart: getQueryParam(request, "monthStart"),
-        monthEnd: getQueryParam(request, "monthEnd")
+        monthEnd: getQueryParam(request, "monthEnd"),
+        limit: getQueryParam(request, "limit")
       });
       sendSuccess(response, 200, history);
       return;
@@ -30,3 +31,5 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     sendError(response, error);
   }
 }
+
+export default withApiHandler(handler);
