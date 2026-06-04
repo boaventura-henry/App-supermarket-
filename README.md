@@ -22,10 +22,10 @@ Esta fase prepara o backend para uma migracao futura do `localStorage` para Supa
 
 Arquivos principais:
 
-- `prisma/schema.prisma`: modelos `User`, `ShoppingList`, `Product`, `PriceHistory` e `PasskeyCredential`.
-- `prisma/migrations/20260603000000_init/migration.sql`: migration SQL inicial para Supabase/Postgres.
-- `server/prisma.ts`: instancia unica/reutilizavel do Prisma Client para ambiente serverless.
-- `api/db-health.ts`: endpoint inicial de health check de banco para Vercel Serverless Functions.
+- `prisma/schema.prisma`: schema inicial preparado para a migracao.
+- `src/server/prisma.ts`: instancia unica/reutilizavel do Prisma Client.
+- `api/health.ts`: health check simples para Vercel Functions.
+- `docs/supabase-prisma-setup.md`: configuracao completa e proximos passos.
 
 Variaveis obrigatorias na Vercel:
 
@@ -34,16 +34,10 @@ Variaveis obrigatorias na Vercel:
 
 Nao coloque valores reais no codigo. Use `.env.example` apenas como modelo e configure os valores reais em `Vercel > Project Settings > Environment Variables`.
 
-Comandos Prisma:
-
-```bash
-npm run prisma:generate
-npm run prisma:validate
-npm run prisma:migrate:dev
-npm run prisma:migrate:deploy
-```
-
-Para aplicar migrations em producao, configure `DATABASE_URL` e `DIRECT_URL` na Vercel e rode `npm run prisma:migrate:deploy` em ambiente seguro de deploy/backend. O Prisma Client deve ser usado somente em `api/` ou outro backend; nunca importe Prisma diretamente em componentes React executados no navegador.
+Nenhuma migration foi criada ou aplicada porque esta fase nao recebeu uma
+conexao real. Consulte `docs/supabase-prisma-setup.md` antes de criar a primeira
+migration. O Prisma Client deve ser usado somente em `api/` ou outro backend;
+nunca importe Prisma diretamente em componentes React executados no navegador.
 
 ## Por que Vite + React
 
