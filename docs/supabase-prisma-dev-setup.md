@@ -169,13 +169,12 @@ SQL gerado.
 
 ## Resultado desta etapa
 
-Nesta execucao:
+Na preparacao inicial desta etapa:
 
 - o schema foi conferido;
 - `.env.example` ja continha `DATABASE_URL` e `DIRECT_URL` vazias;
 - um `.env` local ignorado foi criado com campos vazios;
 - nenhuma variavel real foi fornecida;
-- nenhuma migration foi criada ou aplicada;
 - nenhuma conexao ao Supabase foi realizada;
 - o frontend e o `localStorage` permaneceram inalterados.
 
@@ -188,11 +187,11 @@ npm run lint
 npm run build
 ```
 
-O ambiente local desta execucao possui Node.js, mas nao disponibiliza os
-comandos `npm` e `npx`. Por isso, o GitHub Actions da branch executa instalacao,
-geracao do Prisma Client, validacao do schema, lint e build. O comando
-`prisma migrate dev` nao foi executado porque as URLs reais ainda nao foram
-configuradas.
+O ambiente original nao disponibilizava os comandos `npm` e `npx`. A validacao
+posterior usou uma distribuicao portatil oficial do Node.js fora do repositorio.
+A migration inicial foi criada, revisada e aplicada depois que as URLs reais
+foram configuradas. Consulte `docs/prisma-migration-report.md` para o resultado
+completo.
 
 ## Proximos passos para a Fase 2
 
