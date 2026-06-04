@@ -43,6 +43,14 @@ import {
   getPasskeyAssertion,
   getPasskeySupport
 } from "./webauthn";
+import {
+  USE_REMOTE_LISTS,
+  createList as createRemoteList,
+  deleteList as deleteRemoteList,
+  getLists as getRemoteLists,
+  toLocalShoppingList,
+  updateList as updateRemoteList
+} from "./services/listApi";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
@@ -207,6 +215,32 @@ export function App() {
     const userId = pendingPasskeyUser?.uid;
     return Boolean(userId && database.passkeys.some((passkey) => passkey.userId === userId));
   }, [database.passkeys, pendingPasskeyUser]);
+
+  useEffect(() => {
+    if (!USE_REMOTE_LISTS || !currentUser) {
+      return;
+    }
+
+    let cancelled = false;
+    getRemoteLists(currentUser)
+      .then((remoteLists) => {
+        if (cancelled) {
+          return;
+        }
+        const lists = remoteLists.map((list) => toLocalShoppingList(list, currentUser.uid));
+        setDatabase((current) => ({
+          ...current,
+          lists: [...current.lists.filter((list) => list.userId !== currentUser.uid), ...lists]
+        }));
+      })
+      .catch((error) => {
+        console.error("Nao foi possivel sincronizar listas remotas. O cache local foi preservado.", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -379,7 +413,7 @@ export function App() {
     setIsMenuOpen(false);
   }
 
-  function saveShoppingList(form: ListForm) {
+  async function saveShoppingList(form: ListForm) {
     if (!currentUser) {
       return;
     }
@@ -387,6 +421,24 @@ export function App() {
     const name = form.name.trim();
     if (!name) {
       throw new Error("Informe o nome da lista.");
+    }
+
+    if (USE_REMOTE_LISTS) {
+      const remoteList =
+        editingListId && editingListId !== "new"
+          ? await updateRemoteList(editingListId, currentUser, { name, color: form.color })
+          : await createRemoteList(currentUser, { name, color: form.color });
+      const list = toLocalShoppingList(remoteList, currentUser.uid);
+
+      updateDatabase((current) => ({
+        ...current,
+        lists: current.lists.some((item) => item.id === list.id)
+          ? current.lists.map((item) => (item.id === list.id ? list : item))
+          : [...current.lists, list]
+      }));
+      setSelectedListId(list.id);
+      setEditingListId(null);
+      return;
     }
 
     const now = Date.now();
@@ -416,9 +468,12 @@ export function App() {
     setEditingListId(null);
   }
 
-  function deleteShoppingList(listId: string) {
+  async function deleteShoppingList(listId: string) {
     if (!currentUser) {
       return;
+    }
+    if (USE_REMOTE_LISTS) {
+      await deleteRemoteList(listId, currentUser);
     }
     updateDatabase((current) => ({
       ...current,
@@ -1060,8 +1115,8 @@ function ShoppingList({
   onStartList: () => void;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
-  onSaveList: (form: ListForm) => void;
-  onDeleteList: (listId: string) => void;
+  onSaveList: (form: ListForm) => void | Promise<void>;
+  onDeleteList: (listId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
@@ -1218,7 +1273,9 @@ function ShoppingList({
                         type="button"
                         onClick={() => {
                           if (window.confirm(`Excluir a lista "${list.name}"?`)) {
-                            onDeleteList(list.id);
+                            void Promise.resolve(onDeleteList(list.id)).catch((error) => {
+                              window.alert(error instanceof Error ? error.message : "Nao foi possivel excluir a lista.");
+                            });
                           }
                         }}
                         aria-label="Excluir lista"
@@ -1710,17 +1767,29 @@ function SortIndicator({ active, direction }: { active: boolean; direction: Prod
   );
 }
 
-function ListEditor({ list, onCancel, onSave }: { list: ShoppingList | null; onCancel: () => void; onSave: (form: ListForm) => void }) {
+function ListEditor({
+  list,
+  onCancel,
+  onSave
+}: {
+  list: ShoppingList | null;
+  onCancel: () => void;
+  onSave: (form: ListForm) => void | Promise<void>;
+}) {
   const [form, setForm] = useState<ListForm>(() => (list ? { name: list.name, color: list.color } : emptyListForm));
   const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setIsSaving(true);
     try {
-      onSave(form);
+      await onSave(form);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel salvar.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -1742,9 +1811,9 @@ function ListEditor({ list, onCancel, onSave }: { list: ShoppingList | null; onC
       </div>
       {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
       <div className="mt-5 flex gap-3">
-        <button className="button-primary" type="submit">
+        <button className="button-primary" type="submit" disabled={isSaving}>
           <Save size={18} />
-          Salvar
+          {isSaving ? "Salvando..." : "Salvar"}
         </button>
         <button className="button-secondary" type="button" onClick={onCancel}>
           Cancelar
@@ -1777,8 +1846,8 @@ function SharedLists({
   editingListId: string | null;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
-  onSaveList: (form: ListForm) => void;
-  onDeleteList: (listId: string) => void;
+  onSaveList: (form: ListForm) => void | Promise<void>;
+  onDeleteList: (listId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
@@ -1813,8 +1882,8 @@ function SharedListsContent(props: {
   editingListId: string | null;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
-  onSaveList: (form: ListForm) => void;
-  onDeleteList: (listId: string) => void;
+  onSaveList: (form: ListForm) => void | Promise<void>;
+  onDeleteList: (listId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
