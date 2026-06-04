@@ -39,6 +39,12 @@ jobs:
       - name: Run lint
         run: npm run lint
 
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/superlist
+          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/superlist
+
       - name: Validate Prisma schema
         run: npm run prisma:validate
         env:

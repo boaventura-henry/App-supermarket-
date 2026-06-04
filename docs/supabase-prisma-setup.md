@@ -93,6 +93,10 @@ foi criada ou aplicada nesta fase porque nenhuma conexao real foi fornecida.
 
 Nao invente URLs e nao execute migrations destrutivas diretamente em producao.
 
+Consulte `docs/supabase-prisma-dev-setup.md` para o passo a passo de criacao do
+projeto Supabase de desenvolvimento, configuracao da Vercel e revisao da
+primeira migration.
+
 ## Health check
 
 Depois do deploy na Vercel:
