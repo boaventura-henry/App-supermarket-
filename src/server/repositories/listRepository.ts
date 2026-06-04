@@ -103,7 +103,7 @@ export async function remove(id: string, userId: string) {
       userId,
       OR: idFilter(id)
     },
-    select: { id: true }
+    select: { id: true, name: true }
   });
 
   if (!existing) {
