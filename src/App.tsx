@@ -43,6 +43,27 @@ import {
   getPasskeyAssertion,
   getPasskeySupport
 } from "./webauthn";
+import {
+  USE_REMOTE_LISTS,
+  createList as createRemoteList,
+  deleteList as deleteRemoteList,
+  getLists as getRemoteLists,
+  toLocalShoppingList,
+  updateList as updateRemoteList
+} from "./services/listApi";
+import {
+  USE_REMOTE_PRODUCTS,
+  createProduct as createRemoteProduct,
+  deleteProduct as deleteRemoteProduct,
+  getProducts as getRemoteProducts,
+  togglePurchased as toggleRemotePurchased,
+  updateProduct as updateRemoteProduct
+} from "./services/productApi";
+import {
+  USE_REMOTE_PRICE_HISTORY,
+  createPriceHistory as createRemotePriceHistory,
+  getPriceHistory as getRemotePriceHistory
+} from "./services/priceHistoryApi";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
@@ -203,10 +224,80 @@ export function App() {
     return getUserData(database, currentUser.uid);
   }, [currentUser, database]);
 
+  useEffect(() => {
+    if (!USE_REMOTE_PRODUCTS || !currentUser || !selectedListId) {
+      return;
+    }
+
+    let isMounted = true;
+    getRemoteProducts(selectedListId, currentUser)
+      .then((products) => {
+        if (!isMounted) {
+          return;
+        }
+        setDatabase((current) => replaceProductsForList(current, selectedListId, products));
+      })
+      .catch((error) => {
+        console.error("Nao foi possivel carregar produtos remotos.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser, selectedListId]);
+
+  useEffect(() => {
+    if (!USE_REMOTE_PRICE_HISTORY || !currentUser) {
+      return;
+    }
+
+    let isMounted = true;
+    getRemotePriceHistory(currentUser)
+      .then((history) => {
+        if (!isMounted) {
+          return;
+        }
+        setDatabase((current) => replacePriceHistoryForUser(current, currentUser.uid, history));
+      })
+      .catch((error) => {
+        console.error("Nao foi possivel carregar historico remoto.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
+
   const pendingUserHasPasskey = useMemo(() => {
     const userId = pendingPasskeyUser?.uid;
     return Boolean(userId && database.passkeys.some((passkey) => passkey.userId === userId));
   }, [database.passkeys, pendingPasskeyUser]);
+
+  useEffect(() => {
+    if (!USE_REMOTE_LISTS || !currentUser) {
+      return;
+    }
+
+    let cancelled = false;
+    getRemoteLists(currentUser)
+      .then((remoteLists) => {
+        if (cancelled) {
+          return;
+        }
+        const lists = remoteLists.map((list) => toLocalShoppingList(list, currentUser.uid));
+        setDatabase((current) => ({
+          ...current,
+          lists: [...current.lists.filter((list) => list.userId !== currentUser.uid), ...lists]
+        }));
+      })
+      .catch((error) => {
+        console.error("Nao foi possivel sincronizar listas remotas. O cache local foi preservado.", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -219,6 +310,48 @@ export function App() {
 
   function updateDatabase(updater: (database: AppDatabase) => AppDatabase) {
     setDatabase((current) => updater(current));
+  }
+
+  function replaceProductsForList(current: AppDatabase, listId: string, products: Product[]) {
+    return {
+      ...current,
+      products: [...current.products.filter((product) => product.listId !== listId), ...products]
+    };
+  }
+
+  function upsertProduct(current: AppDatabase, product: Product) {
+    const exists = current.products.some((item) => item.id === product.id);
+    return {
+      ...current,
+      products: exists ? current.products.map((item) => (item.id === product.id ? product : item)) : [...current.products, product]
+    };
+  }
+
+  function removeProduct(current: AppDatabase, productId: string, userId: string) {
+    return {
+      ...current,
+      products: current.products.filter((product) => !(product.id === productId && product.userId === userId))
+    };
+  }
+
+  function replacePriceHistoryForUser(current: AppDatabase, userId: string, priceHistory: PriceHistory[]) {
+    return {
+      ...current,
+      priceHistory: [...current.priceHistory.filter((history) => history.userId !== userId), ...priceHistory]
+    };
+  }
+
+  async function refreshRemotePriceHistory(user: User) {
+    if (!USE_REMOTE_PRICE_HISTORY) {
+      return;
+    }
+    const history = await getRemotePriceHistory(user);
+    setDatabase((current) => replacePriceHistoryForUser(current, user.uid, history));
+  }
+
+  function reportRemoteProductError(error: unknown, fallbackMessage: string) {
+    console.error(fallbackMessage, error);
+    window.alert(error instanceof Error ? error.message : fallbackMessage);
   }
 
   function userNeedsPasskeyOffer(user: User) {
@@ -379,7 +512,7 @@ export function App() {
     setIsMenuOpen(false);
   }
 
-  function saveShoppingList(form: ListForm) {
+  async function saveShoppingList(form: ListForm) {
     if (!currentUser) {
       return;
     }
@@ -387,6 +520,24 @@ export function App() {
     const name = form.name.trim();
     if (!name) {
       throw new Error("Informe o nome da lista.");
+    }
+
+    if (USE_REMOTE_LISTS) {
+      const remoteList =
+        editingListId && editingListId !== "new"
+          ? await updateRemoteList(editingListId, currentUser, { name, color: form.color })
+          : await createRemoteList(currentUser, { name, color: form.color });
+      const list = toLocalShoppingList(remoteList, currentUser.uid);
+
+      updateDatabase((current) => ({
+        ...current,
+        lists: current.lists.some((item) => item.id === list.id)
+          ? current.lists.map((item) => (item.id === list.id ? list : item))
+          : [...current.lists, list]
+      }));
+      setSelectedListId(list.id);
+      setEditingListId(null);
+      return;
     }
 
     const now = Date.now();
@@ -416,9 +567,12 @@ export function App() {
     setEditingListId(null);
   }
 
-  function deleteShoppingList(listId: string) {
+  async function deleteShoppingList(listId: string) {
     if (!currentUser) {
       return;
+    }
+    if (USE_REMOTE_LISTS) {
+      await deleteRemoteList(listId, currentUser);
     }
     updateDatabase((current) => ({
       ...current,
@@ -452,6 +606,58 @@ export function App() {
     const brand = form.brand.trim();
     const supermarket = form.supermarket.trim();
     const timestamp = Date.now();
+
+    if (USE_REMOTE_PRODUCTS) {
+      void createRemoteProduct(listId, currentUser, {
+        name,
+        brand,
+        quantity,
+        unitPrice,
+        supermarket
+      })
+        .then((product) => {
+          updateDatabase((current) => ({
+            ...upsertProduct(current, product),
+            priceHistory:
+              !USE_REMOTE_PRICE_HISTORY && unitPrice !== null && unitPrice > 0
+                ? [
+                    ...current.priceHistory,
+                    {
+                      id: createId("hist"),
+                      userId: currentUser.uid,
+                      listId,
+                      productName: name,
+                      brand,
+                      price: unitPrice,
+                      supermarket,
+                      timestamp
+                    }
+                  ]
+                : current.priceHistory,
+            lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
+          }));
+          void refreshRemotePriceHistory(currentUser).catch((error) =>
+            reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
+          );
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o produto."));
+      return;
+    }
+
+    if (USE_REMOTE_PRICE_HISTORY && unitPrice !== null && unitPrice > 0) {
+      void createRemotePriceHistory(currentUser, {
+        ...(USE_REMOTE_LISTS ? { listId } : {}),
+        productName: name,
+        brand,
+        quantity,
+        price: unitPrice,
+        supermarket,
+        createdAt: new Date(timestamp).toISOString()
+      })
+        .then(() => refreshRemotePriceHistory(currentUser))
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o historico remoto."));
+    }
+
     updateDatabase((current) => {
       const nextSortOrder =
         current.products
@@ -471,7 +677,7 @@ export function App() {
         sortOrder: nextSortOrder
       };
       const history: PriceHistory[] =
-        unitPrice !== null && unitPrice > 0
+        !USE_REMOTE_PRICE_HISTORY && unitPrice !== null && unitPrice > 0
           ? [
               ...current.priceHistory,
               {
@@ -499,6 +705,14 @@ export function App() {
     if (!currentUser) {
       return;
     }
+    if (USE_REMOTE_PRODUCTS) {
+      void deleteRemoteProduct(productId, currentUser)
+        .then(() => {
+          updateDatabase((current) => removeProduct(current, productId, currentUser.uid));
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel excluir o produto."));
+      return;
+    }
     updateDatabase((current) => ({
       ...current,
       products: current.products.filter((product) => !(product.id === productId && product.userId === currentUser.uid))
@@ -507,6 +721,18 @@ export function App() {
 
   function toggleBought(productId: string) {
     if (!currentUser) {
+      return;
+    }
+    if (USE_REMOTE_PRODUCTS) {
+      const target = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+      if (!target) {
+        return;
+      }
+      void toggleRemotePurchased(productId, currentUser, !target.isBought)
+        .then((product) => {
+          updateDatabase((current) => upsertProduct(current, product));
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar o status do produto."));
       return;
     }
     updateDatabase((current) => ({
@@ -536,6 +762,70 @@ export function App() {
     const nextSupermarket = draft.supermarket.trim();
     const timestamp = Date.now();
 
+    if (USE_REMOTE_PRODUCTS) {
+      const target = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+      if (!target) {
+        return;
+      }
+      void updateRemoteProduct(productId, currentUser, {
+        brand: nextBrand,
+        quantity: nextQuantity,
+        unitPrice: nextUnitPrice,
+        supermarket: nextSupermarket
+      })
+        .then((updated) => {
+          const historyPrice =
+            typeof nextUnitPrice === "number" && nextUnitPrice > 0 && nextUnitPrice !== target.unitPrice ? nextUnitPrice : null;
+          updateDatabase((current) => ({
+            ...upsertProduct(current, updated),
+            priceHistory:
+              !USE_REMOTE_PRICE_HISTORY && historyPrice !== null
+                ? [
+                    ...current.priceHistory,
+                    {
+                      id: createId("hist"),
+                      userId: currentUser.uid,
+                      listId: target.listId,
+                      productName: target.name,
+                      brand: nextBrand,
+                      price: historyPrice,
+                      supermarket: nextSupermarket,
+                      timestamp
+                    }
+                  ]
+                : current.priceHistory,
+            lists: current.lists.map((list) => (list.id === target.listId ? { ...list, updatedAt: timestamp } : list))
+          }));
+          void refreshRemotePriceHistory(currentUser).catch((error) =>
+            reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
+          );
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar o produto."));
+      return;
+    }
+
+    const targetForRemoteHistory = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+    if (
+      USE_REMOTE_PRICE_HISTORY &&
+      targetForRemoteHistory &&
+      typeof nextUnitPrice === "number" &&
+      nextUnitPrice > 0 &&
+      nextUnitPrice !== targetForRemoteHistory.unitPrice
+    ) {
+      void createRemotePriceHistory(currentUser, {
+        ...(USE_REMOTE_LISTS ? { listId: targetForRemoteHistory.listId } : {}),
+        ...(USE_REMOTE_PRODUCTS ? { productId } : {}),
+        productName: targetForRemoteHistory.name,
+        brand: nextBrand,
+        quantity: nextQuantity,
+        price: nextUnitPrice,
+        supermarket: nextSupermarket,
+        createdAt: new Date(timestamp).toISOString()
+      })
+        .then(() => refreshRemotePriceHistory(currentUser))
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o historico remoto."));
+    }
+
     updateDatabase((current) => {
       const target = current.products.find((product) => product.id === productId && product.userId === currentUser.uid);
       if (!target) {
@@ -552,7 +842,7 @@ export function App() {
       const historyPrice =
         typeof nextUnitPrice === "number" && nextUnitPrice > 0 && nextUnitPrice !== target.unitPrice ? nextUnitPrice : null;
       const history =
-        historyPrice !== null
+        !USE_REMOTE_PRICE_HISTORY && historyPrice !== null
           ? [
               ...current.priceHistory,
               {
@@ -588,6 +878,27 @@ export function App() {
     }
 
     const timestamp = Date.now();
+    if (USE_REMOTE_PRODUCTS) {
+      const targets = database.products.filter((product) => product.userId === currentUser.uid && product.listId === listId);
+      void Promise.all(
+        targets.map((product) =>
+          updateRemoteProduct(product.id, currentUser, {
+            brand: fields.brand ? "" : product.brand,
+            quantity: fields.quantity ? null : product.quantity,
+            unitPrice: fields.unitPrice ? null : product.unitPrice,
+            supermarket: fields.supermarket ? "" : product.supermarket
+          })
+        )
+      )
+        .then((products) => {
+          updateDatabase((current) => ({
+            ...products.reduce((next, product) => upsertProduct(next, product), current),
+            lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
+          }));
+        })
+        .catch((error) => reportRemoteProductError(error, "Nao foi possivel limpar os campos da lista."));
+      return;
+    }
     updateDatabase((current) => ({
       ...current,
       products: current.products.map((product) => {
@@ -1060,8 +1371,8 @@ function ShoppingList({
   onStartList: () => void;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
-  onSaveList: (form: ListForm) => void;
-  onDeleteList: (listId: string) => void;
+  onSaveList: (form: ListForm) => void | Promise<void>;
+  onDeleteList: (listId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
@@ -1218,7 +1529,9 @@ function ShoppingList({
                         type="button"
                         onClick={() => {
                           if (window.confirm(`Excluir a lista "${list.name}"?`)) {
-                            onDeleteList(list.id);
+                            void Promise.resolve(onDeleteList(list.id)).catch((error) => {
+                              window.alert(error instanceof Error ? error.message : "Nao foi possivel excluir a lista.");
+                            });
                           }
                         }}
                         aria-label="Excluir lista"
@@ -1710,17 +2023,29 @@ function SortIndicator({ active, direction }: { active: boolean; direction: Prod
   );
 }
 
-function ListEditor({ list, onCancel, onSave }: { list: ShoppingList | null; onCancel: () => void; onSave: (form: ListForm) => void }) {
+function ListEditor({
+  list,
+  onCancel,
+  onSave
+}: {
+  list: ShoppingList | null;
+  onCancel: () => void;
+  onSave: (form: ListForm) => void | Promise<void>;
+}) {
   const [form, setForm] = useState<ListForm>(() => (list ? { name: list.name, color: list.color } : emptyListForm));
   const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setIsSaving(true);
     try {
-      onSave(form);
+      await onSave(form);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel salvar.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -1742,9 +2067,9 @@ function ListEditor({ list, onCancel, onSave }: { list: ShoppingList | null; onC
       </div>
       {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
       <div className="mt-5 flex gap-3">
-        <button className="button-primary" type="submit">
+        <button className="button-primary" type="submit" disabled={isSaving}>
           <Save size={18} />
-          Salvar
+          {isSaving ? "Salvando..." : "Salvar"}
         </button>
         <button className="button-secondary" type="button" onClick={onCancel}>
           Cancelar
@@ -1777,8 +2102,8 @@ function SharedLists({
   editingListId: string | null;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
-  onSaveList: (form: ListForm) => void;
-  onDeleteList: (listId: string) => void;
+  onSaveList: (form: ListForm) => void | Promise<void>;
+  onDeleteList: (listId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
@@ -1813,8 +2138,8 @@ function SharedListsContent(props: {
   editingListId: string | null;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
-  onSaveList: (form: ListForm) => void;
-  onDeleteList: (listId: string) => void;
+  onSaveList: (form: ListForm) => void | Promise<void>;
+  onDeleteList: (listId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;

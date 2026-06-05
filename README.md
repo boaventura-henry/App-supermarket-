@@ -16,6 +16,89 @@ Como a Netlify hospeda frontend estatico e funcoes serverless, o app Android foi
 
 Na versao Netlify, os dados ficam em um banco local do navegador (`localStorage`) com todos os registros separados por `userId`. Isso permite uso multiusuario no mesmo navegador sem depender de credenciais externas. Para sincronizacao entre dispositivos, a camada `src/storage.ts` pode ser substituida por Firebase, Supabase ou outro backend persistente mantendo os mesmos tipos de dominio.
 
+## Supabase Postgres + Prisma - fase 1
+
+Esta fase prepara o backend para uma migracao futura do `localStorage` para Supabase Postgres usando Prisma ORM. O frontend continua funcionando com `localStorage` e a chave `app-supermarket-db-v2`; nenhuma tela foi migrada para banco remoto nesta etapa.
+
+Arquivos principais:
+
+- `prisma/schema.prisma`: modelos `Profile`, `ShoppingList`, `Product`, `PriceHistory` e `PasskeyCredential`.
+- `prisma/migrations/20260604161701_init/migration.sql`: migration SQL inicial para Supabase/Postgres.
+- `src/server/prisma.ts`: instancia unica/reutilizavel do Prisma Client.
+- `api/health.ts`: health check simples para Vercel Functions.
+- `api/lists`: endpoints serverless para gerenciamento de listas via Prisma.
+- `api/products`: endpoints serverless para gerenciamento de produtos via Prisma.
+- `api/price-history`: endpoints serverless para historico de precos via Prisma.
+- `src/server/repositories/listRepository.ts`: operacoes Prisma para listas.
+- `src/server/services/listService.ts`: regras de negocio e validacoes da API de listas.
+- `src/server/repositories/productRepository.ts`: operacoes Prisma para produtos.
+- `src/server/services/productService.ts`: regras de negocio, ownership e validacoes da API de produtos.
+- `src/server/repositories/priceHistoryRepository.ts`: operacoes Prisma para historico de precos.
+- `src/server/services/priceHistoryService.ts`: filtros, ownership, normalizacao e criacao de historico.
+- `src/services/listApi.ts`: cliente `fetch` para CRUD remoto de listas.
+- `src/services/productApi.ts`: cliente `fetch` para CRUD remoto de produtos.
+- `src/services/priceHistoryApi.ts`: cliente `fetch` para historico remoto.
+- `docs/supabase-prisma-setup.md`: configuracao completa e proximos passos.
+
+Variaveis obrigatorias na Vercel:
+
+- `DATABASE_URL`: URL pooled do Supabase Postgres, usada pelo Prisma Client em runtime serverless.
+- `DIRECT_URL`: URL direta do Supabase Postgres, usada para migrations.
+- `VITE_USE_REMOTE_LISTS`: feature flag nao sensivel. Use `false` para manter `localStorage`; use `true` apenas quando a UI de listas for migrada para API.
+- `VITE_USE_REMOTE_PRODUCTS`: feature flag nao sensivel. Use `false` para manter produtos no `localStorage`; use `true` apenas quando o CRUD de produtos for migrado para API.
+- `VITE_USE_REMOTE_PRICE_HISTORY`: feature flag nao sensivel. Use `false` para manter historico no `localStorage`; use `true` quando Dashboard/Histórico forem alimentados pela API.
+
+Nao coloque valores reais no codigo. Use `.env.example` apenas como modelo e configure os valores reais em `Vercel > Project Settings > Environment Variables`.
+
+Nenhuma migration foi criada ou aplicada porque esta fase nao recebeu uma
+conexao real. Consulte `docs/supabase-prisma-setup.md` antes de criar a primeira
+migration. O Prisma Client deve ser usado somente em `api/` ou outro backend;
+nunca importe Prisma diretamente em componentes React executados no navegador.
+
+## Supabase Postgres + Prisma - fase 3
+
+Esta fase prepara o CRUD remoto de produtos usando Vercel Functions, Prisma e Supabase Postgres. O `localStorage` continua ativo por padrao para preservar a experiencia atual e os dados antigos. A troca para API remota e controlada por `VITE_USE_REMOTE_PRODUCTS=true`.
+
+Endpoints de produtos:
+
+- `GET /api/lists/:listId/products`
+- `POST /api/lists/:listId/products`
+- `PUT /api/products/:id`
+- `DELETE /api/products/:id`
+- `PATCH /api/products/:id/purchased`
+
+Regras implementadas no backend:
+
+- Prisma roda apenas em `api/`/`src/server`, nunca no navegador.
+- Toda operacao valida a identidade temporaria por headers e ownership da lista/produto.
+- Usuarios podem visualizar produtos de listas compartilhadas, mas somente o criador da lista pode criar, editar, excluir ou marcar comprado.
+- `quantity` e `unitPrice` aceitam vazio e usam `Decimal` no banco.
+- `purchased` e `sortOrder` preservam a regra visual: itens nao comprados aparecem primeiro, comprados vao para o fim e, ao desmarcar, retornam para a ordem original.
+- `Valor total` segue calculado em runtime no frontend e nao e persistido.
+
+## Supabase Postgres + Prisma - fase 4
+
+Esta fase prepara o historico de precos remoto usando Vercel Functions, Prisma e Supabase Postgres. O `localStorage` permanece como fallback por padrao e a troca gradual e controlada por `VITE_USE_REMOTE_PRICE_HISTORY=true`.
+
+Endpoints de historico:
+
+- `GET /api/price-history`
+- `GET /api/price-history?productName=Arroz&supermarket=Mercado&monthStart=2026-01&monthEnd=2026-06`
+- `POST /api/price-history`
+- `GET /api/price-history/:id`
+- `DELETE /api/price-history/:id`
+
+Regras implementadas:
+
+- Prisma continua restrito ao backend/API.
+- Toda leitura e exclusao filtra pela identidade temporaria enviada nos headers.
+- `productId`, `listId` e `quantity` sao opcionais para manter compatibilidade com historicos antigos baseados apenas no nome do produto.
+- `price` usa `Decimal` no banco.
+- `createdAt` no Prisma registra a data do historico e alimenta filtros mensais.
+- Quando o CRUD remoto de produtos cria um produto com `unitPrice > 0`, a API gera historico automaticamente.
+- Quando a edicao remota altera `unitPrice` para um valor valido maior que zero, a API gera novo historico; salvar o mesmo valor novamente nao duplica registro.
+- Dashboard e tela de Historico carregam dados da API quando `VITE_USE_REMOTE_PRICE_HISTORY=true`; caso contrario seguem usando `localStorage`.
+
 ## Por que Vite + React
 
 Vite + React foi escolhido porque a camada Netlify precisa ser uma SPA rapida, estatica e simples de publicar em `dist`. Next.js nao e necessario aqui porque nao ha SSR, rotas server-side complexas ou renderizacao incremental. As necessidades serverless foram isoladas em Netlify Functions.

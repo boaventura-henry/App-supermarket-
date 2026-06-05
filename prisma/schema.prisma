@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Profile {
+  id           String              @id @default(uuid()) @db.Uuid
+  legacyId     String?             @unique
+  email        String              @unique
+  name         String
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  lists        ShoppingList[]
+  products     Product[]
+  priceHistory PriceHistory[]
+  passkeys     PasskeyCredential[]
+
+  @@map("profiles")
+}
+
+model ShoppingList {
+  id        String         @id @default(uuid()) @db.Uuid
+  legacyId  String?        @unique
+  userId    String         @db.Uuid
+  name      String
+  color     String
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  user      Profile        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products  Product[]
+  history   PriceHistory[]
+
+  @@index([userId])
+  @@map("shopping_lists")
+}
+
+model Product {
+  id           String         @id @default(uuid()) @db.Uuid
+  legacyId     String?        @unique
+  listId       String         @db.Uuid
+  userId       String         @db.Uuid
+  name         String
+  brand        String?
+  quantity     Decimal?       @db.Decimal(12, 3)
+  unitPrice    Decimal?       @db.Decimal(12, 2)
+  supermarket  String?
+  purchased    Boolean        @default(false)
+  sortOrder    Int            @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  list         ShoppingList   @relation(fields: [listId], references: [id], onDelete: Cascade)
+  user         Profile        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  priceHistory PriceHistory[]
+
+  @@index([userId])
+  @@index([listId, purchased, sortOrder])
+  @@map("products")
+}
+
+model PriceHistory {
+  id          String        @id @default(uuid()) @db.Uuid
+  legacyId    String?       @unique
+  userId      String        @db.Uuid
+  listId      String?       @db.Uuid
+  productId   String?       @db.Uuid
+  productName String
+  brand       String?
+  supermarket String?
+  price       Decimal       @db.Decimal(12, 2)
+  quantity    Decimal?      @db.Decimal(12, 3)
+  createdAt   DateTime      @default(now())
+  user        Profile       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  list        ShoppingList? @relation(fields: [listId], references: [id], onDelete: SetNull)
+  product     Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([listId])
+  @@index([productId])
+  @@map("price_history")
+}
+
+model PasskeyCredential {
+  id           String   @id @default(uuid()) @db.Uuid
+  legacyId     String?  @unique
+  userId       String   @db.Uuid
+  credentialId String   @unique
+  publicKey    Bytes
+  counter      BigInt   @default(0)
+  deviceName   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("passkey_credentials")
+}
