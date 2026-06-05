@@ -15,9 +15,11 @@
 .cxx
 local.properties
 .env
+.env.local
 debug.keystore
 node_modules
 dist
+*.tsbuildinfo
 .netlify
 npm-debug.log*
 yarn-debug.log*
