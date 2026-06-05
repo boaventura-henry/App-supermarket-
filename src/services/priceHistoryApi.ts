@@ -1,4 +1,4 @@
-import type { PriceHistory } from "../types";
+import type { PriceHistory, User } from "../types";
 
 export const USE_REMOTE_PRICE_HISTORY = import.meta.env.VITE_USE_REMOTE_PRICE_HISTORY === "true";
 
@@ -11,7 +11,6 @@ export type PriceHistoryFilters = {
 };
 
 export type PriceHistoryPayload = {
-  userId: string;
   listId?: string;
   productId?: string;
   productName: string;
@@ -21,6 +20,8 @@ export type PriceHistoryPayload = {
   price: number | string;
   createdAt?: string;
 };
+
+export type PriceHistoryIdentity = Pick<User, "uid" | "email" | "name">;
 
 type RemotePriceHistory = {
   id: string;
@@ -38,37 +39,39 @@ type RemotePriceHistory = {
   createdAt: string;
 };
 
-export async function getPriceHistory(userId: string, filters: PriceHistoryFilters = {}) {
-  const params = new URLSearchParams({ userId });
+export async function getPriceHistory(identity: PriceHistoryIdentity, filters: PriceHistoryFilters = {}) {
+  const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
     if (value) {
       params.set(key, value);
     }
   }
 
-  const history = await request<RemotePriceHistory[]>(`/api/price-history?${params.toString()}`);
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const history = await request<RemotePriceHistory[]>(`/api/price-history${suffix}`, identity);
   return history.map(toLocalPriceHistory);
 }
 
-export async function createPriceHistory(payload: PriceHistoryPayload) {
-  const history = await request<RemotePriceHistory>("/api/price-history", {
+export async function createPriceHistory(identity: PriceHistoryIdentity, payload: PriceHistoryPayload) {
+  const history = await request<RemotePriceHistory>("/api/price-history", identity, {
     method: "POST",
     body: JSON.stringify(payload)
   });
   return toLocalPriceHistory(history);
 }
 
-export async function deletePriceHistory(id: string, userId: string) {
-  return request<{ id: string }>(`/api/price-history/${encodeURIComponent(id)}?userId=${encodeURIComponent(userId)}`, {
+export async function deletePriceHistory(id: string, identity: PriceHistoryIdentity) {
+  return request<{ id: string }>(`/api/price-history/${encodeURIComponent(id)}`, identity, {
     method: "DELETE"
   });
 }
 
-async function request<T>(url: string, init: RequestInit = {}) {
+async function request<T>(url: string, identity: PriceHistoryIdentity, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
-  if (!headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
+  headers.set("Content-Type", "application/json");
+  headers.set("x-superlist-user-id", encodeURIComponent(identity.uid));
+  headers.set("x-superlist-user-email", encodeURIComponent(identity.email));
+  headers.set("x-superlist-user-name", encodeURIComponent(identity.name));
 
   const response = await fetch(url, {
     ...init,

@@ -44,6 +44,14 @@ import {
   getPasskeySupport
 } from "./webauthn";
 import {
+  USE_REMOTE_LISTS,
+  createList as createRemoteList,
+  deleteList as deleteRemoteList,
+  getLists as getRemoteLists,
+  toLocalShoppingList,
+  updateList as updateRemoteList
+} from "./services/listApi";
+import {
   USE_REMOTE_PRODUCTS,
   createProduct as createRemoteProduct,
   deleteProduct as deleteRemoteProduct,
@@ -222,7 +230,7 @@ export function App() {
     }
 
     let isMounted = true;
-    getRemoteProducts(selectedListId, currentUser.uid)
+    getRemoteProducts(selectedListId, currentUser)
       .then((products) => {
         if (!isMounted) {
           return;
@@ -244,7 +252,7 @@ export function App() {
     }
 
     let isMounted = true;
-    getRemotePriceHistory(currentUser.uid)
+    getRemotePriceHistory(currentUser)
       .then((history) => {
         if (!isMounted) {
           return;
@@ -264,6 +272,32 @@ export function App() {
     const userId = pendingPasskeyUser?.uid;
     return Boolean(userId && database.passkeys.some((passkey) => passkey.userId === userId));
   }, [database.passkeys, pendingPasskeyUser]);
+
+  useEffect(() => {
+    if (!USE_REMOTE_LISTS || !currentUser) {
+      return;
+    }
+
+    let cancelled = false;
+    getRemoteLists(currentUser)
+      .then((remoteLists) => {
+        if (cancelled) {
+          return;
+        }
+        const lists = remoteLists.map((list) => toLocalShoppingList(list, currentUser.uid));
+        setDatabase((current) => ({
+          ...current,
+          lists: [...current.lists.filter((list) => list.userId !== currentUser.uid), ...lists]
+        }));
+      })
+      .catch((error) => {
+        console.error("Nao foi possivel sincronizar listas remotas. O cache local foi preservado.", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -307,12 +341,12 @@ export function App() {
     };
   }
 
-  async function refreshRemotePriceHistory(userId: string) {
+  async function refreshRemotePriceHistory(user: User) {
     if (!USE_REMOTE_PRICE_HISTORY) {
       return;
     }
-    const history = await getRemotePriceHistory(userId);
-    setDatabase((current) => replacePriceHistoryForUser(current, userId, history));
+    const history = await getRemotePriceHistory(user);
+    setDatabase((current) => replacePriceHistoryForUser(current, user.uid, history));
   }
 
   function reportRemoteProductError(error: unknown, fallbackMessage: string) {
@@ -478,7 +512,7 @@ export function App() {
     setIsMenuOpen(false);
   }
 
-  function saveShoppingList(form: ListForm) {
+  async function saveShoppingList(form: ListForm) {
     if (!currentUser) {
       return;
     }
@@ -486,6 +520,24 @@ export function App() {
     const name = form.name.trim();
     if (!name) {
       throw new Error("Informe o nome da lista.");
+    }
+
+    if (USE_REMOTE_LISTS) {
+      const remoteList =
+        editingListId && editingListId !== "new"
+          ? await updateRemoteList(editingListId, currentUser, { name, color: form.color })
+          : await createRemoteList(currentUser, { name, color: form.color });
+      const list = toLocalShoppingList(remoteList, currentUser.uid);
+
+      updateDatabase((current) => ({
+        ...current,
+        lists: current.lists.some((item) => item.id === list.id)
+          ? current.lists.map((item) => (item.id === list.id ? list : item))
+          : [...current.lists, list]
+      }));
+      setSelectedListId(list.id);
+      setEditingListId(null);
+      return;
     }
 
     const now = Date.now();
@@ -515,9 +567,12 @@ export function App() {
     setEditingListId(null);
   }
 
-  function deleteShoppingList(listId: string) {
+  async function deleteShoppingList(listId: string) {
     if (!currentUser) {
       return;
+    }
+    if (USE_REMOTE_LISTS) {
+      await deleteRemoteList(listId, currentUser);
     }
     updateDatabase((current) => ({
       ...current,
@@ -553,8 +608,7 @@ export function App() {
     const timestamp = Date.now();
 
     if (USE_REMOTE_PRODUCTS) {
-      void createRemoteProduct(listId, {
-        userId: currentUser.uid,
+      void createRemoteProduct(listId, currentUser, {
         name,
         brand,
         quantity,
@@ -582,7 +636,7 @@ export function App() {
                 : current.priceHistory,
             lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
           }));
-          void refreshRemotePriceHistory(currentUser.uid).catch((error) =>
+          void refreshRemotePriceHistory(currentUser).catch((error) =>
             reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
           );
         })
@@ -591,9 +645,8 @@ export function App() {
     }
 
     if (USE_REMOTE_PRICE_HISTORY && unitPrice !== null && unitPrice > 0) {
-      void createRemotePriceHistory({
-        userId: currentUser.uid,
-        listId,
+      void createRemotePriceHistory(currentUser, {
+        ...(USE_REMOTE_LISTS ? { listId } : {}),
         productName: name,
         brand,
         quantity,
@@ -601,7 +654,7 @@ export function App() {
         supermarket,
         createdAt: new Date(timestamp).toISOString()
       })
-        .then(() => refreshRemotePriceHistory(currentUser.uid))
+        .then(() => refreshRemotePriceHistory(currentUser))
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o historico remoto."));
     }
 
@@ -653,7 +706,7 @@ export function App() {
       return;
     }
     if (USE_REMOTE_PRODUCTS) {
-      void deleteRemoteProduct(productId, currentUser.uid)
+      void deleteRemoteProduct(productId, currentUser)
         .then(() => {
           updateDatabase((current) => removeProduct(current, productId, currentUser.uid));
         })
@@ -675,7 +728,7 @@ export function App() {
       if (!target) {
         return;
       }
-      void toggleRemotePurchased(productId, currentUser.uid, !target.isBought)
+      void toggleRemotePurchased(productId, currentUser, !target.isBought)
         .then((product) => {
           updateDatabase((current) => upsertProduct(current, product));
         })
@@ -714,8 +767,7 @@ export function App() {
       if (!target) {
         return;
       }
-      void updateRemoteProduct(productId, {
-        userId: currentUser.uid,
+      void updateRemoteProduct(productId, currentUser, {
         brand: nextBrand,
         quantity: nextQuantity,
         unitPrice: nextUnitPrice,
@@ -744,7 +796,7 @@ export function App() {
                 : current.priceHistory,
             lists: current.lists.map((list) => (list.id === target.listId ? { ...list, updatedAt: timestamp } : list))
           }));
-          void refreshRemotePriceHistory(currentUser.uid).catch((error) =>
+          void refreshRemotePriceHistory(currentUser).catch((error) =>
             reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
           );
         })
@@ -760,10 +812,9 @@ export function App() {
       nextUnitPrice > 0 &&
       nextUnitPrice !== targetForRemoteHistory.unitPrice
     ) {
-      void createRemotePriceHistory({
-        userId: currentUser.uid,
-        listId: targetForRemoteHistory.listId,
-        productId,
+      void createRemotePriceHistory(currentUser, {
+        ...(USE_REMOTE_LISTS ? { listId: targetForRemoteHistory.listId } : {}),
+        ...(USE_REMOTE_PRODUCTS ? { productId } : {}),
         productName: targetForRemoteHistory.name,
         brand: nextBrand,
         quantity: nextQuantity,
@@ -771,7 +822,7 @@ export function App() {
         supermarket: nextSupermarket,
         createdAt: new Date(timestamp).toISOString()
       })
-        .then(() => refreshRemotePriceHistory(currentUser.uid))
+        .then(() => refreshRemotePriceHistory(currentUser))
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o historico remoto."));
     }
 
@@ -831,8 +882,7 @@ export function App() {
       const targets = database.products.filter((product) => product.userId === currentUser.uid && product.listId === listId);
       void Promise.all(
         targets.map((product) =>
-          updateRemoteProduct(product.id, {
-            userId: currentUser.uid,
+          updateRemoteProduct(product.id, currentUser, {
             brand: fields.brand ? "" : product.brand,
             quantity: fields.quantity ? null : product.quantity,
             unitPrice: fields.unitPrice ? null : product.unitPrice,
@@ -1321,8 +1371,8 @@ function ShoppingList({
   onStartList: () => void;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
-  onSaveList: (form: ListForm) => void;
-  onDeleteList: (listId: string) => void;
+  onSaveList: (form: ListForm) => void | Promise<void>;
+  onDeleteList: (listId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
@@ -1479,7 +1529,9 @@ function ShoppingList({
                         type="button"
                         onClick={() => {
                           if (window.confirm(`Excluir a lista "${list.name}"?`)) {
-                            onDeleteList(list.id);
+                            void Promise.resolve(onDeleteList(list.id)).catch((error) => {
+                              window.alert(error instanceof Error ? error.message : "Nao foi possivel excluir a lista.");
+                            });
                           }
                         }}
                         aria-label="Excluir lista"
@@ -1971,17 +2023,29 @@ function SortIndicator({ active, direction }: { active: boolean; direction: Prod
   );
 }
 
-function ListEditor({ list, onCancel, onSave }: { list: ShoppingList | null; onCancel: () => void; onSave: (form: ListForm) => void }) {
+function ListEditor({
+  list,
+  onCancel,
+  onSave
+}: {
+  list: ShoppingList | null;
+  onCancel: () => void;
+  onSave: (form: ListForm) => void | Promise<void>;
+}) {
   const [form, setForm] = useState<ListForm>(() => (list ? { name: list.name, color: list.color } : emptyListForm));
   const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setIsSaving(true);
     try {
-      onSave(form);
+      await onSave(form);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel salvar.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -2003,9 +2067,9 @@ function ListEditor({ list, onCancel, onSave }: { list: ShoppingList | null; onC
       </div>
       {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
       <div className="mt-5 flex gap-3">
-        <button className="button-primary" type="submit">
+        <button className="button-primary" type="submit" disabled={isSaving}>
           <Save size={18} />
-          Salvar
+          {isSaving ? "Salvando..." : "Salvar"}
         </button>
         <button className="button-secondary" type="button" onClick={onCancel}>
           Cancelar
@@ -2038,8 +2102,8 @@ function SharedLists({
   editingListId: string | null;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
-  onSaveList: (form: ListForm) => void;
-  onDeleteList: (listId: string) => void;
+  onSaveList: (form: ListForm) => void | Promise<void>;
+  onDeleteList: (listId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
@@ -2074,8 +2138,8 @@ function SharedListsContent(props: {
   editingListId: string | null;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
-  onSaveList: (form: ListForm) => void;
-  onDeleteList: (listId: string) => void;
+  onSaveList: (form: ListForm) => void | Promise<void>;
+  onDeleteList: (listId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;

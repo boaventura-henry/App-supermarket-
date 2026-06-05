@@ -1,10 +1,11 @@
 import { Prisma } from "@prisma/client";
 import { AppError } from "../errors";
 import * as priceHistoryRepository from "../repositories/priceHistoryRepository";
+import * as profileRepository from "../repositories/profileRepository";
+import type { LocalIdentity } from "../repositories/profileRepository";
 import type { PriceHistoryCreateInput, PriceHistoryRecord } from "../repositories/priceHistoryRepository";
 
 export type PriceHistoryPayload = {
-  userId?: unknown;
   listId?: unknown;
   productId?: unknown;
   productName?: unknown;
@@ -16,7 +17,6 @@ export type PriceHistoryPayload = {
 };
 
 export type PriceHistoryQuery = {
-  userId?: unknown;
   productName?: unknown;
   supermarket?: unknown;
   brand?: unknown;
@@ -24,22 +24,22 @@ export type PriceHistoryQuery = {
   monthEnd?: unknown;
 };
 
-export async function getPriceHistory(query: PriceHistoryQuery) {
-  const user = await requireUser(query.userId);
+export async function getPriceHistory(identity: LocalIdentity, query: PriceHistoryQuery) {
+  const profile = await resolveProfile(identity);
   const filters = {
-    productName: optionalString(query.productName),
-    supermarket: optionalString(query.supermarket),
-    brand: optionalString(query.brand),
+    productName: optionalText(query.productName),
+    supermarket: optionalText(query.supermarket),
+    brand: optionalText(query.brand),
     ...parseMonthRange(query.monthStart, query.monthEnd)
   };
-  const history = await priceHistoryRepository.findAllByUser(user.id, filters);
+  const history = await priceHistoryRepository.findAllByUser(profile.id, filters);
   return history.map(mapPriceHistory);
 }
 
-export async function getPriceHistoryRecord(id: unknown, userId: unknown) {
-  const historyId = requireString(id, "Informe o id do historico.");
-  const user = await requireUser(userId);
-  const history = await priceHistoryRepository.findById(historyId, user.id);
+export async function getPriceHistoryRecord(identity: LocalIdentity, id: unknown) {
+  const profile = await resolveProfile(identity);
+  const historyId = requireText(id, "Informe o id do historico.", 160);
+  const history = await priceHistoryRepository.findById(historyId, profile.id);
 
   if (!history) {
     throw new AppError(404, "Historico de precos nao encontrado.");
@@ -48,18 +48,18 @@ export async function getPriceHistoryRecord(id: unknown, userId: unknown) {
   return mapPriceHistory(history);
 }
 
-export async function createPriceHistory(payload: PriceHistoryPayload) {
-  const user = await requireUser(payload.userId);
+export async function createPriceHistory(identity: LocalIdentity, payload: PriceHistoryPayload) {
+  const profile = await resolveProfile(identity);
   const price = parseRequiredPositiveDecimal(payload.price, "Informe um valor valido maior que zero.");
   const createdAt = parseOptionalDate(payload.createdAt);
-  const listId = await resolveOptionalListId(payload.listId, user.id);
-  const productId = await resolveOptionalProductId(payload.productId, user.id);
+  const listId = await resolveOptionalListId(payload.listId, profile.id);
+  const productId = await resolveOptionalProductId(payload.productId, profile.id);
   const history = await priceHistoryRepository.create({
-    userId: user.id,
+    userId: profile.id,
     listId,
     productId,
     productName: normalizeProductName(payload.productName),
-    brand: normalizeOptionalString(payload.brand),
+    brand: normalizeOptionalText(payload.brand),
     supermarket: normalizeSupermarket(payload.supermarket),
     quantity: parseOptionalDecimal(payload.quantity, "Informe uma quantidade valida ou deixe em branco.", 3),
     price,
@@ -69,10 +69,10 @@ export async function createPriceHistory(payload: PriceHistoryPayload) {
   return mapPriceHistory(history);
 }
 
-export async function deletePriceHistory(id: unknown, userId: unknown) {
-  const historyId = requireString(id, "Informe o id do historico.");
-  const user = await requireUser(userId);
-  const removed = await priceHistoryRepository.remove(historyId, user.id);
+export async function deletePriceHistory(identity: LocalIdentity, id: unknown) {
+  const profile = await resolveProfile(identity);
+  const historyId = requireText(id, "Informe o id do historico.", 160);
+  const removed = await priceHistoryRepository.deleteHistory(historyId, profile.id);
 
   if (!removed) {
     throw new AppError(404, "Historico de precos nao encontrado.");
@@ -89,8 +89,8 @@ export async function createAutoPriceHistory(input: PriceHistoryCreateInput) {
   const history = await priceHistoryRepository.create({
     ...input,
     productName: input.productName.trim() || "Produto sem nome",
-    brand: input.brand.trim(),
-    supermarket: input.supermarket.trim() || "Sem supermercado"
+    brand: input.brand?.trim() || null,
+    supermarket: input.supermarket?.trim() || "Sem supermercado"
   });
 
   return mapPriceHistory(history);
@@ -98,6 +98,10 @@ export async function createAutoPriceHistory(input: PriceHistoryCreateInput) {
 
 export function decimalToNumber(value: Prisma.Decimal | null) {
   return value === null ? null : Number(value.toString());
+}
+
+async function resolveProfile(identity: LocalIdentity) {
+  return profileRepository.ensureProfile(normalizeIdentity(identity));
 }
 
 function mapPriceHistory(history: PriceHistoryRecord) {
@@ -118,60 +122,59 @@ function mapPriceHistory(history: PriceHistoryRecord) {
   };
 }
 
-async function requireUser(userId: unknown) {
-  const id = requireString(userId, "Informe o userId.");
-  const user = await priceHistoryRepository.findUserByIdOrLegacyId(id);
-
-  if (!user) {
-    throw new AppError(401, "Usuario nao encontrado.");
-  }
-
-  return user;
-}
-
 async function resolveOptionalListId(value: unknown, userId: string) {
-  const id = optionalString(value);
+  const id = optionalText(value);
   if (!id) {
     return null;
   }
 
-  const list = await priceHistoryRepository.findListById(id);
+  const list = await priceHistoryRepository.findListById(id, userId);
   if (!list) {
     throw new AppError(404, "Lista nao encontrada.");
-  }
-  if (list.userId !== userId) {
-    throw new AppError(403, "Somente o criador pode registrar historico nesta lista.");
   }
 
   return list.id;
 }
 
 async function resolveOptionalProductId(value: unknown, userId: string) {
-  const id = optionalString(value);
+  const id = optionalText(value);
   if (!id) {
     return null;
   }
 
-  const product = await priceHistoryRepository.findProductById(id);
+  const product = await priceHistoryRepository.findProductById(id, userId);
   if (!product) {
     throw new AppError(404, "Produto nao encontrado.");
-  }
-  if (product.userId !== userId) {
-    throw new AppError(403, "Somente o criador pode registrar historico neste produto.");
   }
 
   return product.id;
 }
 
-function requireString(value: unknown, message: string) {
+function normalizeIdentity(identity: LocalIdentity) {
+  const legacyId = requireText(identity.legacyId, "Identidade local ausente.", 160);
+  const name = requireText(identity.name, "Nome do usuario ausente.", 160);
+  const email = requireText(identity.email, "E-mail do usuario ausente.", 320).toLowerCase();
+
+  if (!email.includes("@")) {
+    throw new AppError(400, "E-mail do usuario invalido.");
+  }
+
+  return { legacyId, name, email };
+}
+
+function requireText(value: unknown, message: string, maxLength: number) {
   if (typeof value !== "string" || !value.trim()) {
     throw new AppError(400, message);
   }
 
-  return value.trim();
+  const normalized = value.trim();
+  if (normalized.length > maxLength) {
+    throw new AppError(400, `${message} Limite de ${maxLength} caracteres.`);
+  }
+  return normalized;
 }
 
-function optionalString(value: unknown) {
+function optionalText(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
@@ -179,8 +182,8 @@ function normalizeProductName(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : "Produto sem nome";
 }
 
-function normalizeOptionalString(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
+function normalizeOptionalText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function normalizeSupermarket(value: unknown) {

@@ -1,20 +1,28 @@
-import { getBody, getQueryParam, methodNotAllowed, sendError, sendSuccess, type ApiRequest, type ApiResponse } from "../_utils";
+import {
+  getIdentity,
+  getQueryParam,
+  methodNotAllowed,
+  sendError,
+  sendSuccess,
+  type ApiRequest,
+  type ApiResponse
+} from "../_utils";
 import * as priceHistoryService from "../../src/server/services/priceHistoryService";
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
   const id = getQueryParam(request, "id");
 
   try {
+    const identity = getIdentity(request);
+
     if (request.method === "GET") {
-      const userId = getQueryParam(request, "userId");
-      const history = await priceHistoryService.getPriceHistoryRecord(id, userId);
+      const history = await priceHistoryService.getPriceHistoryRecord(identity, id);
       sendSuccess(response, 200, history);
       return;
     }
 
     if (request.method === "DELETE") {
-      const userId = getQueryParam(request, "userId") ?? getBody(request).userId;
-      const result = await priceHistoryService.deletePriceHistory(id, userId);
+      const result = await priceHistoryService.deletePriceHistory(identity, id);
       sendSuccess(response, 200, result, "Historico de precos excluido");
       return;
     }

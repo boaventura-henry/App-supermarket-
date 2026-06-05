@@ -1,4 +1,4 @@
-import type { Product } from "../types";
+import type { Product, User } from "../types";
 
 export const USE_REMOTE_PRODUCTS = import.meta.env.VITE_USE_REMOTE_PRODUCTS === "true";
 
@@ -21,7 +21,6 @@ export type RemoteProduct = {
 };
 
 export type ProductPayload = {
-  userId: string;
   name?: string;
   brand?: string;
   quantity?: number | string | null;
@@ -29,48 +28,49 @@ export type ProductPayload = {
   supermarket?: string;
 };
 
-export async function getProducts(listId: string, userId: string) {
-  const products = await request<RemoteProduct[]>(
-    `/api/lists/${encodeURIComponent(listId)}/products?userId=${encodeURIComponent(userId)}`
-  );
-  return products.map((product) => toLocalProduct(product, userId, listId));
+export type ProductIdentity = Pick<User, "uid" | "email" | "name">;
+
+export async function getProducts(listId: string, identity: ProductIdentity) {
+  const products = await request<RemoteProduct[]>(`/api/lists/${encodeURIComponent(listId)}/products`, identity);
+  return products.map((product) => toLocalProduct(product, identity.uid, listId));
 }
 
-export async function createProduct(listId: string, payload: ProductPayload) {
-  const product = await request<RemoteProduct>(`/api/lists/${encodeURIComponent(listId)}/products`, {
+export async function createProduct(listId: string, identity: ProductIdentity, payload: ProductPayload) {
+  const product = await request<RemoteProduct>(`/api/lists/${encodeURIComponent(listId)}/products`, identity, {
     method: "POST",
     body: JSON.stringify(payload)
   });
-  return toLocalProduct(product, payload.userId, listId);
+  return toLocalProduct(product, identity.uid, listId);
 }
 
-export async function updateProduct(id: string, payload: ProductPayload) {
-  const product = await request<RemoteProduct>(`/api/products/${encodeURIComponent(id)}`, {
+export async function updateProduct(id: string, identity: ProductIdentity, payload: ProductPayload) {
+  const product = await request<RemoteProduct>(`/api/products/${encodeURIComponent(id)}`, identity, {
     method: "PUT",
     body: JSON.stringify(payload)
   });
-  return toLocalProduct(product, payload.userId);
+  return toLocalProduct(product, identity.uid);
 }
 
-export async function deleteProduct(id: string, userId: string) {
-  return request<{ id: string }>(`/api/products/${encodeURIComponent(id)}?userId=${encodeURIComponent(userId)}`, {
+export async function deleteProduct(id: string, identity: ProductIdentity) {
+  return request<{ id: string }>(`/api/products/${encodeURIComponent(id)}`, identity, {
     method: "DELETE"
   });
 }
 
-export async function togglePurchased(id: string, userId: string, purchased: boolean) {
-  const product = await request<RemoteProduct>(`/api/products/${encodeURIComponent(id)}/purchased`, {
+export async function togglePurchased(id: string, identity: ProductIdentity, purchased: boolean) {
+  const product = await request<RemoteProduct>(`/api/products/${encodeURIComponent(id)}/purchased`, identity, {
     method: "PATCH",
-    body: JSON.stringify({ userId, purchased })
+    body: JSON.stringify({ purchased })
   });
-  return toLocalProduct(product, userId);
+  return toLocalProduct(product, identity.uid);
 }
 
-async function request<T>(url: string, init: RequestInit = {}) {
+async function request<T>(url: string, identity: ProductIdentity, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
-  if (!headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
+  headers.set("Content-Type", "application/json");
+  headers.set("x-superlist-user-id", encodeURIComponent(identity.uid));
+  headers.set("x-superlist-user-email", encodeURIComponent(identity.email));
+  headers.set("x-superlist-user-name", encodeURIComponent(identity.name));
 
   const response = await fetch(url, {
     ...init,

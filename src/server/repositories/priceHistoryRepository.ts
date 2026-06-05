@@ -47,8 +47,8 @@ export type PriceHistoryCreateInput = {
   listId?: string | null;
   productId?: string | null;
   productName: string;
-  brand: string;
-  supermarket: string;
+  brand: string | null;
+  supermarket: string | null;
   quantity?: Prisma.Decimal | null;
   price: Prisma.Decimal;
   createdAt?: Date;
@@ -58,23 +58,10 @@ function idFilter(id: string) {
   return uuidPattern.test(id) ? [{ id }, { legacyId: id }] : [{ legacyId: id }];
 }
 
-export async function findUserByIdOrLegacyId(userId: string) {
-  return prisma.user.findFirst({
-    where: {
-      OR: idFilter(userId)
-    },
-    select: {
-      id: true,
-      legacyId: true,
-      name: true,
-      email: true
-    }
-  });
-}
-
-export async function findListById(listId: string) {
+export function findListById(listId: string, userId: string) {
   return prisma.shoppingList.findFirst({
     where: {
+      userId,
       OR: idFilter(listId)
     },
     select: {
@@ -84,9 +71,10 @@ export async function findListById(listId: string) {
   });
 }
 
-export async function findProductById(productId: string) {
+export function findProductById(productId: string, userId: string) {
   return prisma.product.findFirst({
     where: {
+      userId,
       OR: idFilter(productId)
     },
     select: {
@@ -97,7 +85,7 @@ export async function findProductById(productId: string) {
   });
 }
 
-export async function findAllByUser(userId: string, filters: PriceHistoryFilters = {}) {
+export function findAllByUser(userId: string, filters: PriceHistoryFilters = {}) {
   return prisma.priceHistory.findMany({
     where: {
       userId,
@@ -108,7 +96,7 @@ export async function findAllByUser(userId: string, filters: PriceHistoryFilters
   });
 }
 
-export async function findById(id: string, userId: string) {
+export function findById(id: string, userId: string) {
   return prisma.priceHistory.findFirst({
     where: {
       userId,
@@ -118,19 +106,19 @@ export async function findById(id: string, userId: string) {
   });
 }
 
-export async function findByProductName(userId: string, productName: string) {
+export function findByProductName(userId: string, productName: string) {
   return findAllByUser(userId, { productName });
 }
 
-export async function findBySupermarket(userId: string, supermarket: string) {
+export function findBySupermarket(userId: string, supermarket: string) {
   return findAllByUser(userId, { supermarket });
 }
 
-export async function findByMonthRange(userId: string, monthStart: Date, monthEnd: Date) {
+export function findByMonthRange(userId: string, monthStart: Date, monthEnd: Date) {
   return findAllByUser(userId, { monthStart, monthEnd });
 }
 
-export async function create(input: PriceHistoryCreateInput) {
+export function create(input: PriceHistoryCreateInput) {
   return prisma.priceHistory.create({
     data: {
       userId: input.userId,
@@ -147,7 +135,7 @@ export async function create(input: PriceHistoryCreateInput) {
   });
 }
 
-export async function remove(id: string, userId: string) {
+export async function deleteHistory(id: string, userId: string) {
   const existing = await prisma.priceHistory.findFirst({
     where: {
       userId,
@@ -166,6 +154,8 @@ export async function remove(id: string, userId: string) {
 
   return existing;
 }
+
+export { deleteHistory as delete };
 
 function buildFilterWhere(filters: PriceHistoryFilters): Prisma.PriceHistoryWhereInput {
   return {

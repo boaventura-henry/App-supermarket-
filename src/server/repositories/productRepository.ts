@@ -25,12 +25,7 @@ const productSelect = {
   list: {
     select: {
       legacyId: true,
-      userId: true,
-      user: {
-        select: {
-          legacyId: true
-        }
-      }
+      userId: true
     }
   }
 } as const;
@@ -50,59 +45,47 @@ export type ProductCreateInput = {
   userId: string;
   listId: string;
   name: string;
-  brand: string;
+  brand: string | null;
   quantity: Prisma.Decimal | null;
   unitPrice: Prisma.Decimal | null;
-  supermarket: string;
+  supermarket: string | null;
   sortOrder: number;
 };
 
 export type ProductUpdateInput = {
   name?: string;
-  brand?: string;
+  brand?: string | null;
   quantity?: Prisma.Decimal | null;
   unitPrice?: Prisma.Decimal | null;
-  supermarket?: string;
+  supermarket?: string | null;
 };
 
 function idFilter(id: string) {
   return uuidPattern.test(id) ? [{ id }, { legacyId: id }] : [{ legacyId: id }];
 }
 
-export async function findUserByIdOrLegacyId(userId: string) {
-  return prisma.user.findFirst({
-    where: {
-      OR: idFilter(userId)
-    },
-    select: {
-      id: true,
-      legacyId: true,
-      name: true,
-      email: true
-    }
-  });
-}
-
-export async function findListById(listId: string) {
+export function findListById(listId: string, userId: string) {
   return prisma.shoppingList.findFirst({
     where: {
+      userId,
       OR: idFilter(listId)
     },
     select: listSelect
   });
 }
 
-export async function findAllByList(listId: string) {
+export function findAllByList(listId: string, userId: string) {
   return prisma.product.findMany({
-    where: { listId },
-    orderBy: [{ purchased: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+    where: { listId, userId },
+    orderBy: [{ purchased: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     select: productSelect
   });
 }
 
-export async function findById(id: string) {
+export function findById(id: string, userId: string) {
   return prisma.product.findFirst({
     where: {
+      userId,
       OR: idFilter(id)
     },
     select: productSelect
@@ -118,7 +101,7 @@ export async function nextSortOrder(listId: string, userId: string) {
   return (maxProduct._max.sortOrder ?? -1) + 1;
 }
 
-export async function create(input: ProductCreateInput) {
+export function create(input: ProductCreateInput) {
   return prisma.product.create({
     data: {
       userId: input.userId,
@@ -135,26 +118,40 @@ export async function create(input: ProductCreateInput) {
   });
 }
 
-export async function update(id: string, input: ProductUpdateInput) {
+export async function update(id: string, userId: string, input: ProductUpdateInput) {
+  const product = await findById(id, userId);
+  if (!product) {
+    return null;
+  }
+
   return prisma.product.update({
-    where: { id },
+    where: { id: product.id },
     data: input,
     select: productSelect
   });
 }
 
-export async function remove(id: string) {
-  return prisma.product.delete({
-    where: { id },
-    select: {
-      id: true
-    }
+export async function deleteProduct(id: string, userId: string) {
+  const product = await findById(id, userId);
+  if (!product) {
+    return null;
+  }
+
+  await prisma.product.delete({
+    where: { id: product.id }
   });
+
+  return { id: product.id };
 }
 
-export async function updatePurchasedStatus(id: string, purchased: boolean) {
+export async function updatePurchasedStatus(id: string, userId: string, purchased: boolean) {
+  const product = await findById(id, userId);
+  if (!product) {
+    return null;
+  }
+
   return prisma.product.update({
-    where: { id },
+    where: { id: product.id },
     data: { purchased },
     select: productSelect
   });
@@ -163,7 +160,7 @@ export async function updatePurchasedStatus(id: string, purchased: boolean) {
 export async function reorderProducts(listId: string, userId: string) {
   const products = await prisma.product.findMany({
     where: { listId, userId },
-    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     select: { id: true }
   });
 
