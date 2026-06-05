@@ -1,10 +1,10 @@
 export class AppError extends Error {
-  statusCode: number;
-
-  constructor(statusCode: number, message: string) {
+  constructor(
+    readonly statusCode: number,
+    message: string
+  ) {
     super(message);
     this.name = "AppError";
-    this.statusCode = statusCode;
   }
 }
 
@@ -19,11 +19,12 @@ export function toErrorResponse(error: unknown) {
     };
   }
 
+  console.error("Unhandled API error", error);
   return {
     statusCode: 500,
     body: {
       success: false,
-      message: error instanceof Error ? error.message : "Erro interno do servidor"
+      message: "Erro interno do servidor"
     }
   };
 }

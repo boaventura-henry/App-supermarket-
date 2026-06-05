@@ -22,43 +22,22 @@ Esta fase prepara o backend para uma migracao futura do `localStorage` para Supa
 
 Arquivos principais:
 
-- `prisma/schema.prisma`: modelos `User`, `ShoppingList`, `Product`, `PriceHistory` e `PasskeyCredential`.
-- `prisma/migrations/20260603000000_init/migration.sql`: migration SQL inicial para Supabase/Postgres.
-- `src/server/prisma.ts`: instancia unica/reutilizavel do Prisma Client para ambiente serverless.
-- `api/db-health.ts`: endpoint inicial de health check de banco para Vercel Serverless Functions.
-- `api/lists`: endpoints serverless para gerenciamento de listas via Prisma.
-- `src/server/repositories/listRepository.ts`: operacoes Prisma para listas.
-- `src/server/services/listService.ts`: regras de negocio e validacoes da API de listas.
-- `src/services/listApi.ts`: cliente `fetch` inicial para futura ativacao remota no frontend.
+- `prisma/schema.prisma`: schema inicial preparado para a migracao.
+- `src/server/prisma.ts`: instancia unica/reutilizavel do Prisma Client.
+- `api/health.ts`: health check simples para Vercel Functions.
+- `docs/supabase-prisma-setup.md`: configuracao completa e proximos passos.
 
 Variaveis obrigatorias na Vercel:
 
 - `DATABASE_URL`: URL pooled do Supabase Postgres, usada pelo Prisma Client em runtime serverless.
 - `DIRECT_URL`: URL direta do Supabase Postgres, usada para migrations.
-- `VITE_USE_REMOTE_LISTS`: feature flag nao sensivel. Use `false` para manter `localStorage`; use `true` apenas quando a UI de listas for migrada para API.
 
 Nao coloque valores reais no codigo. Use `.env.example` apenas como modelo e configure os valores reais em `Vercel > Project Settings > Environment Variables`.
 
-Comandos Prisma:
-
-```bash
-npm run prisma:generate
-npm run prisma:validate
-npm run prisma:migrate:dev
-npm run prisma:migrate:deploy
-```
-
-Para aplicar migrations em producao, configure `DATABASE_URL` e `DIRECT_URL` na Vercel e rode `npm run prisma:migrate:deploy` em ambiente seguro de deploy/backend. O Prisma Client deve ser usado somente em `api/` ou outro backend; nunca importe Prisma diretamente em componentes React executados no navegador.
-
-Endpoints de listas preparados para a Fase 2:
-
-- `GET /api/lists?userId=<id>`
-- `GET /api/lists/:id?userId=<id>`
-- `POST /api/lists`
-- `PUT /api/lists/:id`
-- `DELETE /api/lists/:id?userId=<id>`
-
-Todas as operacoes filtram por `userId` no backend. Nesta fase, o `userId` pode ser o UUID do banco ou o `legacyId` vindo da migracao futura do `localStorage`. A UI ainda permanece em `localStorage` por padrao.
+Nenhuma migration foi criada ou aplicada porque esta fase nao recebeu uma
+conexao real. Consulte `docs/supabase-prisma-setup.md` antes de criar a primeira
+migration. O Prisma Client deve ser usado somente em `api/` ou outro backend;
+nunca importe Prisma diretamente em componentes React executados no navegador.
 
 ## Por que Vite + React
 
