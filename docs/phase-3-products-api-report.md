@@ -14,7 +14,7 @@ Supabase Postgres, mantendo o `localStorage` como fallback. A chave
 | Service de produtos | `src/server/services/productService.ts` |
 | Testes de service | `src/server/services/productService.test.ts` |
 | Cliente frontend | `src/services/productApi.ts` |
-| Produtos por lista | `api/lists/[listId]/products.ts` |
+| Produtos por lista | `api/lists/[id]/products.ts` |
 | Produto por id | `api/products/[id].ts` |
 | Status comprado | `api/products/[id]/purchased.ts` |
 

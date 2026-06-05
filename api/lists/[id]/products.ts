@@ -11,7 +11,7 @@ import {
 import * as productService from "../../../src/server/services/productService";
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
-  const listId = getQueryParam(request, "listId");
+  const listId = getQueryParam(request, "id");
 
   try {
     const identity = getIdentity(request);
