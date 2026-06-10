@@ -2,8 +2,9 @@ export type User = {
   uid: string;
   name: string;
   email: string;
-  passwordHash: string;
-  securityAnswerHash: string;
+  passwordHash?: string;
+  securityAnswerHash?: string;
+  authProvider?: "local" | "supabase";
   createdAt: number;
 };
 
@@ -36,6 +37,23 @@ export type ShoppingList = {
   userId: string;
   name: string;
   color: string;
+  createdAt: number;
+  updatedAt: number;
+  sharedPermission?: SharePermission;
+  ownerName?: string;
+  ownerEmail?: string;
+};
+
+export type SharePermission = "viewer" | "editor";
+
+export type ListShare = {
+  id: string;
+  listId: string;
+  ownerUserId: string;
+  sharedUserId: string;
+  sharedUserEmail: string;
+  sharedUserName: string;
+  permission: SharePermission;
   createdAt: number;
   updatedAt: number;
 };

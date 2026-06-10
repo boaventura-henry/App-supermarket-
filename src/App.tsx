@@ -30,13 +30,12 @@ import {
 import {
   createId,
   getUserData,
-  hashText,
   loadDatabase,
   normalizeEmail,
   saveDatabase,
   sortByNewest
 } from "./storage";
-import type { AppDatabase, PriceHistory, Product, ShoppingList, User, View } from "./types";
+import type { AppDatabase, ListShare, PriceHistory, Product, SharePermission, ShoppingList, User, View } from "./types";
 import {
   createPasskeyForUser,
   describePasskeyError,
@@ -64,6 +63,26 @@ import {
   createPriceHistory as createRemotePriceHistory,
   getPriceHistory as getRemotePriceHistory
 } from "./services/priceHistoryApi";
+import {
+  findProfileByEmail,
+  getListShares,
+  removeListShare,
+  shareListWithUser,
+  updateListSharePermission
+} from "./services/shareApi";
+import {
+  getAuthDiagnostic,
+  getCurrentSession,
+  getCurrentUser,
+  isSupabaseConfigured,
+  logAuthError,
+  onAuthStateChange,
+  sendPasswordReset,
+  signIn,
+  signOut,
+  signUp,
+  toLocalUser
+} from "./services/authService";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
@@ -88,6 +107,11 @@ type ClearProductFields = {
 type ListForm = {
   name: string;
   color: string;
+};
+
+type ShareForm = {
+  email: string;
+  permission: SharePermission;
 };
 
 type ProductSortField = "original" | "name" | "quantity";
@@ -168,12 +192,66 @@ function loadTheme(): ThemeMode {
   return localStorage.getItem("app-supermarket-theme") === "dark" ? "dark" : "light";
 }
 
+const ENABLE_LOCAL_FALLBACK = import.meta.env.VITE_ENABLE_LOCAL_FALLBACK === "true";
+
+function loadInitialDatabase(): AppDatabase {
+  const loaded = loadDatabase();
+  if (ENABLE_LOCAL_FALLBACK) {
+    return loaded;
+  }
+
+  return {
+    ...loaded,
+    // Supabase is the source of truth for business data. Keep only local-only
+    // passkeys/profile cache and force session restoration through Supabase Auth.
+    lists: [],
+    products: [],
+    priceHistory: [],
+    activeUserId: null
+  };
+}
+
+function createPersistableDatabase(database: AppDatabase): AppDatabase {
+  if (ENABLE_LOCAL_FALLBACK) {
+    return database;
+  }
+
+  return {
+    ...database,
+    activeUserId: null,
+    lists: [],
+    products: [],
+    priceHistory: []
+  };
+}
+
+function getVisibleRemoteData(database: AppDatabase, userId: string) {
+  const lists = database.lists.filter((list) => list.userId === userId || Boolean(list.sharedPermission));
+  const visibleListIds = new Set(lists.map((list) => list.id));
+  return {
+    lists,
+    products: database.products.filter((product) => visibleListIds.has(product.listId)),
+    priceHistory: database.priceHistory.filter(
+      (history) => history.userId === userId || (history.listId ? visibleListIds.has(history.listId) : false)
+    )
+  };
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function App() {
-  const [database, setDatabase] = useState<AppDatabase>(() => loadDatabase());
+  const [database, setDatabase] = useState<AppDatabase>(() => loadInitialDatabase());
   const [view, setView] = useState<View>("home");
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
+  const [lastSupabaseError, setLastSupabaseError] = useState("");
+  const [lastSupabaseOperation, setLastSupabaseOperation] = useState("");
+  const [lastSupabaseTable, setLastSupabaseTable] = useState("");
+  const [lastAuthError, setLastAuthError] = useState("");
+  const [lastAuthOperation, setLastAuthOperation] = useState("");
   const [passkeyMessage, setPasskeyMessage] = useState("");
   const [passkeyError, setPasskeyError] = useState("");
   const [passkeySupported, setPasskeySupported] = useState(false);
@@ -181,16 +259,64 @@ export function App() {
   const [pendingPasskeyUserId, setPendingPasskeyUserId] = useState<string | null>(null);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [editingListId, setEditingListId] = useState<string | null>(null);
+  const [listShares, setListShares] = useState<ListShare[]>([]);
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   useEffect(() => {
-    saveDatabase(database);
+    saveDatabase(createPersistableDatabase(database));
   }, [database]);
 
   useEffect(() => {
     localStorage.setItem("app-supermarket-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setAuthError("Supabase nao configurado. Verifique variaveis Vercel.");
+      setLastAuthError("Supabase nao configurado. Verifique VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.");
+      setLastAuthOperation("config");
+      return;
+    }
+
+    let isMounted = true;
+    getCurrentSession()
+      .then(() => getCurrentUser())
+      .then((user) => {
+        if (!isMounted || !user) {
+          return;
+        }
+        setDatabase((current) => mergeAuthenticatedUser(current, user));
+        setLastSupabaseError("");
+        setLastAuthError("");
+        setLastAuthOperation("getCurrentSession");
+      })
+      .catch((error) => {
+        const diagnostic = getAuthDiagnostic(error);
+        setLastSupabaseError(diagnostic.message);
+        setLastAuthError(diagnostic.message);
+        setLastAuthOperation(diagnostic.operation);
+        logAuthError(error);
+        console.error("Nao foi possivel restaurar a sessao Supabase.", error);
+      });
+
+    const {
+      data: { subscription }
+    } = onAuthStateChange((event, session) => {
+      setLastAuthOperation(event);
+      if (!session?.user) {
+        setDatabase((current) => ({ ...current, activeUserId: null }));
+        return;
+      }
+      setDatabase((current) => mergeAuthenticatedUser(current, toLocalUser(session.user)));
+      setLastAuthError("");
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -221,8 +347,72 @@ export function App() {
     if (!currentUser) {
       return { lists: [], products: [], priceHistory: [] };
     }
+    if (isSupabaseConfigured && !ENABLE_LOCAL_FALLBACK) {
+      return getVisibleRemoteData(database, currentUser.uid);
+    }
     return getUserData(database, currentUser.uid);
   }, [currentUser, database]);
+
+  const showSupabaseDebug = import.meta.env.DEV || import.meta.env.VITE_DEBUG_SUPABASE === "true";
+  const userListIds = useMemo(() => userData.lists.map((list) => list.id).sort().join("|"), [userData.lists]);
+
+  useEffect(() => {
+    const listIds = userListIds ? userListIds.split("|") : [];
+    if (!USE_REMOTE_PRODUCTS || !currentUser || listIds.length === 0) {
+      return;
+    }
+
+    let isMounted = true;
+    setLastSupabaseOperation("select");
+    setLastSupabaseTable("products");
+    Promise.all(listIds.map((listId) => getRemoteProducts(listId, currentUser)))
+      .then((productGroups) => {
+        if (!isMounted) {
+          return;
+        }
+        setDatabase((current) => replaceProductsForLists(current, listIds, productGroups.flat()));
+        setLastSupabaseError("");
+      })
+      .catch((error) => {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel carregar produtos remotos."));
+        console.error("Nao foi possivel carregar todos os produtos remotos.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser, userListIds]);
+
+  useEffect(() => {
+    const ownedListIds = userData.lists
+      .filter((list) => list.userId === currentUser?.uid)
+      .map((list) => list.id)
+      .sort();
+    if (!currentUser || ownedListIds.length === 0) {
+      setListShares([]);
+      return;
+    }
+
+    let isMounted = true;
+    setLastSupabaseOperation("select");
+    setLastSupabaseTable("list_shares");
+    Promise.all(ownedListIds.map((listId) => getListShares(listId, currentUser)))
+      .then((sharesByList) => {
+        if (!isMounted) {
+          return;
+        }
+        setListShares(sharesByList.flat());
+        setLastSupabaseError("");
+      })
+      .catch((error) => {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel carregar compartilhamentos."));
+        console.error("Nao foi possivel carregar compartilhamentos.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser, userData.lists]);
 
   useEffect(() => {
     if (!USE_REMOTE_PRODUCTS || !currentUser || !selectedListId) {
@@ -230,14 +420,18 @@ export function App() {
     }
 
     let isMounted = true;
+    setLastSupabaseOperation("select");
+    setLastSupabaseTable("products");
     getRemoteProducts(selectedListId, currentUser)
       .then((products) => {
         if (!isMounted) {
           return;
         }
         setDatabase((current) => replaceProductsForList(current, selectedListId, products));
+        setLastSupabaseError("");
       })
       .catch((error) => {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel carregar produtos remotos."));
         console.error("Nao foi possivel carregar produtos remotos.", error);
       });
 
@@ -252,14 +446,18 @@ export function App() {
     }
 
     let isMounted = true;
+    setLastSupabaseOperation("select");
+    setLastSupabaseTable("price_history");
     getRemotePriceHistory(currentUser)
       .then((history) => {
         if (!isMounted) {
           return;
         }
         setDatabase((current) => replacePriceHistoryForUser(current, currentUser.uid, history));
+        setLastSupabaseError("");
       })
       .catch((error) => {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel carregar historico remoto."));
         console.error("Nao foi possivel carregar historico remoto.", error);
       });
 
@@ -279,18 +477,21 @@ export function App() {
     }
 
     let cancelled = false;
+    setLastSupabaseOperation("select");
+    setLastSupabaseTable("shopping_lists");
     getRemoteLists(currentUser)
-      .then((remoteLists) => {
+      .then((lists) => {
         if (cancelled) {
           return;
         }
-        const lists = remoteLists.map((list) => toLocalShoppingList(list, currentUser.uid));
         setDatabase((current) => ({
           ...current,
-          lists: [...current.lists.filter((list) => list.userId !== currentUser.uid), ...lists]
+          lists
         }));
+        setLastSupabaseError("");
       })
       .catch((error) => {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel sincronizar listas remotas."));
         console.error("Nao foi possivel sincronizar listas remotas. O cache local foi preservado.", error);
       });
 
@@ -312,10 +513,38 @@ export function App() {
     setDatabase((current) => updater(current));
   }
 
+  function mergeAuthenticatedUser(current: AppDatabase, user: User): AppDatabase {
+    const exists = current.users.some((item) => item.uid === user.uid);
+    return {
+      ...current,
+      activeUserId: user.uid,
+      users: exists
+        ? current.users.map((item) =>
+            item.uid === user.uid
+              ? {
+                  ...item,
+                  ...user,
+                  passwordHash: item.passwordHash,
+                  securityAnswerHash: item.securityAnswerHash
+                }
+              : item
+          )
+        : [...current.users, user]
+    };
+  }
+
   function replaceProductsForList(current: AppDatabase, listId: string, products: Product[]) {
     return {
       ...current,
       products: [...current.products.filter((product) => product.listId !== listId), ...products]
+    };
+  }
+
+  function replaceProductsForLists(current: AppDatabase, listIds: string[], products: Product[]) {
+    const listIdSet = new Set(listIds);
+    return {
+      ...current,
+      products: [...current.products.filter((product) => !listIdSet.has(product.listId)), ...products]
     };
   }
 
@@ -327,10 +556,10 @@ export function App() {
     };
   }
 
-  function removeProduct(current: AppDatabase, productId: string, userId: string) {
+  function removeProduct(current: AppDatabase, productId: string) {
     return {
       ...current,
-      products: current.products.filter((product) => !(product.id === productId && product.userId === userId))
+      products: current.products.filter((product) => product.id !== productId)
     };
   }
 
@@ -350,8 +579,14 @@ export function App() {
   }
 
   function reportRemoteProductError(error: unknown, fallbackMessage: string) {
+    setLastSupabaseError(getErrorMessage(error, fallbackMessage));
     console.error(fallbackMessage, error);
     window.alert(error instanceof Error ? error.message : fallbackMessage);
+  }
+
+  function canEditProductsInList(listId: string) {
+    const list = database.lists.find((item) => item.id === listId);
+    return Boolean(list && (list.userId === currentUser?.uid || list.sharedPermission === "editor"));
   }
 
   function userNeedsPasskeyOffer(user: User) {
@@ -359,7 +594,7 @@ export function App() {
   }
 
   function finishAuthenticatedLogin(user: User) {
-    updateDatabase((current) => ({ ...current, activeUserId: user.uid }));
+    updateDatabase((current) => mergeAuthenticatedUser(current, user));
     setPendingPasskeyUserId(null);
     setPasskeyMessage("");
     setPasskeyError("");
@@ -373,76 +608,114 @@ export function App() {
     setPasskeyError("");
     setPasskeyMessage("");
     const normalizedEmail = normalizeEmail(email);
-    const passwordHash = await hashText(password);
-    const user = database.users.find((item) => item.email === normalizedEmail);
-    if (!user || user.passwordHash !== passwordHash) {
-      setAuthError("E-mail ou senha invalidos.");
+    if (!isSupabaseConfigured) {
+      const message = "Supabase nao configurado. Verifique variaveis Vercel.";
+      setLastAuthOperation("signIn");
+      setLastAuthError(message);
+      setLastSupabaseError(message);
+      setAuthError(message);
       return;
     }
-    if (userNeedsPasskeyOffer(user)) {
-      setPendingPasskeyUserId(user.uid);
-      setAuthMode("login");
-      setAuthMessage("Login confirmado. Voce pode ativar biometria agora ou continuar sem ativar.");
-      return;
+
+    try {
+      const user = await signIn(normalizedEmail, password);
+      updateDatabase((current) => mergeAuthenticatedUser(current, user));
+      setLastAuthOperation("signIn");
+      setLastAuthError("");
+      setLastSupabaseError("");
+      if (userNeedsPasskeyOffer(user)) {
+        setPendingPasskeyUserId(user.uid);
+        setAuthMode("login");
+        setAuthMessage("Login confirmado. Voce pode ativar biometria agora ou continuar sem ativar.");
+        return;
+      }
+      finishAuthenticatedLogin(user);
+    } catch (error) {
+      const diagnostic = getAuthDiagnostic(error);
+      setLastAuthOperation(diagnostic.operation);
+      setLastAuthError(diagnostic.message);
+      setLastSupabaseError(diagnostic.message);
+      setAuthError(diagnostic.message);
+      logAuthError(error);
     }
-    finishAuthenticatedLogin(user);
   }
 
-  async function handleRegister(name: string, email: string, password: string, securityAnswer: string) {
+  async function handleRegister(name: string, email: string, password: string) {
     setAuthError("");
     setAuthMessage("");
     setPasskeyError("");
     setPasskeyMessage("");
     const normalizedEmail = normalizeEmail(email);
-    if (!name.trim() || !normalizedEmail || password.length < 6 || !securityAnswer.trim()) {
-      setAuthError("Preencha nome, e-mail, senha com 6+ caracteres e resposta de seguranca.");
-      return;
-    }
-    if (database.users.some((user) => user.email === normalizedEmail)) {
-      setAuthError("Ja existe uma conta com esse e-mail.");
+    if (!name.trim() || !normalizedEmail || password.length < 6) {
+      setAuthError("Preencha nome, e-mail e senha com 6+ caracteres.");
       return;
     }
 
-    const user: User = {
-      uid: createId("usr"),
-      name: name.trim(),
-      email: normalizedEmail,
-      passwordHash: await hashText(password),
-      securityAnswerHash: await hashText(securityAnswer),
-      createdAt: Date.now()
-    };
-
-    updateDatabase((current) => ({ ...current, users: [...current.users, user] }));
-    if (userNeedsPasskeyOffer(user)) {
-      setPendingPasskeyUserId(user.uid);
-      setAuthMode("login");
-      setAuthMessage("Conta criada. Voce pode ativar biometria agora ou continuar sem ativar.");
+    if (!isSupabaseConfigured) {
+      const message = "Supabase nao configurado. Verifique variaveis Vercel.";
+      setLastAuthOperation("signUp");
+      setLastAuthError(message);
+      setLastSupabaseError(message);
+      setAuthError(message);
       return;
     }
-    finishAuthenticatedLogin(user);
+
+    try {
+      const result = await signUp(name, normalizedEmail, password);
+      setLastAuthOperation("signUp");
+      setLastAuthError("");
+      setLastSupabaseError("");
+      if (result.needsEmailConfirmation) {
+        setAuthMode("login");
+        setAuthMessage("Conta criada no Supabase. Confirme seu e-mail antes de entrar.");
+        return;
+      }
+      updateDatabase((current) => mergeAuthenticatedUser(current, result.user));
+      if (userNeedsPasskeyOffer(result.user)) {
+        setPendingPasskeyUserId(result.user.uid);
+        setAuthMode("login");
+        setAuthMessage("Conta criada. Voce pode ativar biometria agora ou continuar sem ativar.");
+        return;
+      }
+      finishAuthenticatedLogin(result.user);
+    } catch (error) {
+      const diagnostic = getAuthDiagnostic(error);
+      setLastAuthOperation(diagnostic.operation);
+      setLastAuthError(diagnostic.message);
+      setLastSupabaseError(diagnostic.message);
+      setAuthError(diagnostic.message);
+      logAuthError(error);
+    }
   }
 
-  async function handleRecover(email: string, securityAnswer: string, newPassword: string) {
+  async function handleRecover(email: string) {
     setAuthError("");
     setAuthMessage("");
     const normalizedEmail = normalizeEmail(email);
-    const answerHash = await hashText(securityAnswer);
-    const user = database.users.find((item) => item.email === normalizedEmail);
-    if (!user || user.securityAnswerHash !== answerHash) {
-      setAuthError("Dados de recuperacao invalidos.");
+    if (!isSupabaseConfigured) {
+      const message = "Supabase nao configurado. Verifique variaveis Vercel.";
+      setLastAuthOperation("resetPassword");
+      setLastAuthError(message);
+      setLastSupabaseError(message);
+      setAuthError(message);
       return;
     }
-    if (newPassword.length < 6) {
-      setAuthError("A nova senha precisa ter pelo menos 6 caracteres.");
-      return;
+
+    try {
+      await sendPasswordReset(normalizedEmail);
+      setLastAuthOperation("resetPassword");
+      setLastAuthError("");
+      setLastSupabaseError("");
+      setAuthMessage("Enviamos as instrucoes de recuperacao para o seu e-mail.");
+      setAuthMode("login");
+    } catch (error) {
+      const diagnostic = getAuthDiagnostic(error);
+      setLastAuthOperation(diagnostic.operation);
+      setLastAuthError(diagnostic.message);
+      setLastSupabaseError(diagnostic.message);
+      setAuthError(diagnostic.message);
+      logAuthError(error);
     }
-    const passwordHash = await hashText(newPassword);
-    updateDatabase((current) => ({
-      ...current,
-      users: current.users.map((item) => (item.uid === user.uid ? { ...item, passwordHash } : item))
-    }));
-    setAuthMessage("Senha atualizada. Entre com a nova senha.");
-    setAuthMode("login");
   }
 
   async function handlePasskeyLogin() {
@@ -494,6 +767,16 @@ export function App() {
   }
 
   function logout() {
+    if (isSupabaseConfigured) {
+      void signOut().catch((error) => {
+        const diagnostic = getAuthDiagnostic(error);
+        setLastAuthOperation(diagnostic.operation);
+        setLastAuthError(diagnostic.message);
+        setLastSupabaseError(diagnostic.message);
+        logAuthError(error);
+        console.error("Nao foi possivel encerrar a sessao Supabase.", error);
+      });
+    }
     updateDatabase((current) => ({ ...current, activeUserId: null }));
     setView("home");
     setPendingPasskeyUserId(null);
@@ -523,6 +806,8 @@ export function App() {
     }
 
     if (USE_REMOTE_LISTS) {
+      setLastSupabaseOperation(editingListId && editingListId !== "new" ? "update" : "insert");
+      setLastSupabaseTable("shopping_lists");
       const remoteList =
         editingListId && editingListId !== "new"
           ? await updateRemoteList(editingListId, currentUser, { name, color: form.color })
@@ -572,6 +857,8 @@ export function App() {
       return;
     }
     if (USE_REMOTE_LISTS) {
+      setLastSupabaseOperation("delete");
+      setLastSupabaseTable("shopping_lists");
       await deleteRemoteList(listId, currentUser);
     }
     updateDatabase((current) => ({
@@ -584,12 +871,49 @@ export function App() {
     setEditingListId(null);
   }
 
+  async function shareShoppingList(listId: string, form: ShareForm) {
+    if (!currentUser) {
+      return;
+    }
+    const profile = await findProfileByEmail(form.email);
+    if (!profile) {
+      throw new Error("Usuario nao encontrado. A pessoa precisa criar conta antes de receber a lista.");
+    }
+    setLastSupabaseOperation("upsert");
+    setLastSupabaseTable("list_shares");
+    const share = await shareListWithUser(listId, currentUser, profile.id, form.permission);
+    setListShares((current) => {
+      const exists = current.some((item) => item.id === share.id);
+      return exists ? current.map((item) => (item.id === share.id ? share : item)) : [...current, share];
+    });
+  }
+
+  async function updateShoppingListShare(shareId: string, permission: SharePermission) {
+    if (!currentUser) {
+      return;
+    }
+    setLastSupabaseOperation("update");
+    setLastSupabaseTable("list_shares");
+    const share = await updateListSharePermission(shareId, currentUser, permission);
+    setListShares((current) => current.map((item) => (item.id === share.id ? share : item)));
+  }
+
+  async function deleteShoppingListShare(shareId: string) {
+    if (!currentUser) {
+      return;
+    }
+    setLastSupabaseOperation("delete");
+    setLastSupabaseTable("list_shares");
+    await removeListShare(shareId, currentUser);
+    setListShares((current) => current.filter((share) => share.id !== shareId));
+  }
+
   function saveProduct(listId: string, form: ProductForm) {
     if (!currentUser) {
       return;
     }
-    if (!database.lists.some((list) => list.id === listId && list.userId === currentUser.uid)) {
-      throw new Error("Somente o criador da lista pode alterar.");
+    if (!canEditProductsInList(listId)) {
+      throw new Error("Voce nao tem permissao para alterar esta lista.");
     }
     const name = form.name.trim();
     if (!name) {
@@ -608,6 +932,8 @@ export function App() {
     const timestamp = Date.now();
 
     if (USE_REMOTE_PRODUCTS) {
+      setLastSupabaseOperation("insert");
+      setLastSupabaseTable("products");
       void createRemoteProduct(listId, currentUser, {
         name,
         brand,
@@ -645,6 +971,8 @@ export function App() {
     }
 
     if (USE_REMOTE_PRICE_HISTORY && unitPrice !== null && unitPrice > 0) {
+      setLastSupabaseOperation("insert");
+      setLastSupabaseTable("price_history");
       void createRemotePriceHistory(currentUser, {
         ...(USE_REMOTE_LISTS ? { listId } : {}),
         productName: name,
@@ -706,9 +1034,11 @@ export function App() {
       return;
     }
     if (USE_REMOTE_PRODUCTS) {
+      setLastSupabaseOperation("delete");
+      setLastSupabaseTable("products");
       void deleteRemoteProduct(productId, currentUser)
         .then(() => {
-          updateDatabase((current) => removeProduct(current, productId, currentUser.uid));
+          updateDatabase((current) => removeProduct(current, productId));
         })
         .catch((error) => reportRemoteProductError(error, "Nao foi possivel excluir o produto."));
       return;
@@ -724,7 +1054,9 @@ export function App() {
       return;
     }
     if (USE_REMOTE_PRODUCTS) {
-      const target = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+      setLastSupabaseOperation("update");
+      setLastSupabaseTable("products");
+      const target = database.products.find((product) => product.id === productId && canEditProductsInList(product.listId));
       if (!target) {
         return;
       }
@@ -763,7 +1095,9 @@ export function App() {
     const timestamp = Date.now();
 
     if (USE_REMOTE_PRODUCTS) {
-      const target = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+      setLastSupabaseOperation("update");
+      setLastSupabaseTable("products");
+      const target = database.products.find((product) => product.id === productId && canEditProductsInList(product.listId));
       if (!target) {
         return;
       }
@@ -804,7 +1138,7 @@ export function App() {
       return;
     }
 
-    const targetForRemoteHistory = database.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+    const targetForRemoteHistory = database.products.find((product) => product.id === productId && canEditProductsInList(product.listId));
     if (
       USE_REMOTE_PRICE_HISTORY &&
       targetForRemoteHistory &&
@@ -827,7 +1161,7 @@ export function App() {
     }
 
     updateDatabase((current) => {
-      const target = current.products.find((product) => product.id === productId && product.userId === currentUser.uid);
+      const target = current.products.find((product) => product.id === productId && canEditProductsInList(product.listId));
       if (!target) {
         return current;
       }
@@ -879,7 +1213,9 @@ export function App() {
 
     const timestamp = Date.now();
     if (USE_REMOTE_PRODUCTS) {
-      const targets = database.products.filter((product) => product.userId === currentUser.uid && product.listId === listId);
+      setLastSupabaseOperation("update");
+      setLastSupabaseTable("products");
+      const targets = database.products.filter((product) => canEditProductsInList(product.listId) && product.listId === listId);
       void Promise.all(
         targets.map((product) =>
           updateRemoteProduct(product.id, currentUser, {
@@ -919,33 +1255,46 @@ export function App() {
 
   if (!currentUser) {
     return (
-      <AuthScreen
-        mode={authMode}
-        error={authError}
-        message={authMessage}
-        onModeChange={(mode) => {
-          setAuthMode(mode);
-          setAuthError("");
-          setAuthMessage("");
-        }}
-        onLogin={handleLogin}
-        onRegister={handleRegister}
-        onRecover={handleRecover}
-        onPasskeyLogin={handlePasskeyLogin}
-        onRegisterPasskey={handleRegisterPasskey}
-        onContinueAfterPasskey={() => {
-          if (pendingPasskeyUser) {
-            finishAuthenticatedLogin(pendingPasskeyUser);
-          }
-        }}
-        passkeySupported={passkeySupported}
-        hasPasskeys={database.passkeys.length > 0}
-        pendingPasskeyUser={pendingPasskeyUser}
-        pendingUserHasPasskey={pendingUserHasPasskey}
-        passkeyMessage={passkeyMessage}
-        passkeyError={passkeyError}
-        isPasskeyBusy={isPasskeyBusy}
-      />
+      <>
+        <AuthScreen
+          mode={authMode}
+          error={authError}
+          message={authMessage}
+          onModeChange={(mode) => {
+            setAuthMode(mode);
+            setAuthError("");
+            setAuthMessage("");
+          }}
+          onLogin={handleLogin}
+          onRegister={handleRegister}
+          onRecover={handleRecover}
+          onPasskeyLogin={handlePasskeyLogin}
+          onRegisterPasskey={handleRegisterPasskey}
+          onContinueAfterPasskey={() => {
+            if (pendingPasskeyUser) {
+              finishAuthenticatedLogin(pendingPasskeyUser);
+            }
+          }}
+          passkeySupported={passkeySupported}
+          hasPasskeys={database.passkeys.length > 0}
+          pendingPasskeyUser={pendingPasskeyUser}
+          pendingUserHasPasskey={pendingUserHasPasskey}
+          passkeyMessage={passkeyMessage}
+          passkeyError={passkeyError}
+          isPasskeyBusy={isPasskeyBusy}
+        />
+        <SupabaseDebugPanel
+          enabled={showSupabaseDebug}
+          currentUser={currentUser}
+          listCount={0}
+          lastError={lastSupabaseError}
+          lastAuthOperation={lastAuthOperation}
+          lastAuthError={lastAuthError}
+          currentView={authMode}
+          lastSupabaseOperation={lastSupabaseOperation}
+          lastSupabaseTable={lastSupabaseTable}
+        />
+      </>
     );
   }
 
@@ -994,6 +1343,7 @@ export function App() {
           lists={userData.lists}
           products={userData.products}
           users={database.users}
+          shares={listShares}
           currentUserId={currentUser.uid}
           selectedListId={selectedListId}
           editingListId={editingListId}
@@ -1004,6 +1354,9 @@ export function App() {
           onCancelList={() => setEditingListId(null)}
           onSaveList={saveShoppingList}
           onDeleteList={deleteShoppingList}
+          onShareList={shareShoppingList}
+          onUpdateShare={updateShoppingListShare}
+          onRemoveShare={deleteShoppingListShare}
           onSaveProduct={saveProduct}
           onToggleBought={toggleBought}
           onInlineChange={saveProductInline}
@@ -1017,12 +1370,16 @@ export function App() {
           users={database.users}
           lists={database.lists}
           products={database.products}
+          shares={listShares}
           currentUserId={currentUser.uid}
           editingListId={editingListId}
           onEditList={setEditingListId}
           onCancelList={() => setEditingListId(null)}
           onSaveList={saveShoppingList}
           onDeleteList={deleteShoppingList}
+          onShareList={shareShoppingList}
+          onUpdateShare={updateShoppingListShare}
+          onRemoveShare={deleteShoppingListShare}
           onSaveProduct={saveProduct}
           onToggleBought={toggleBought}
           onInlineChange={saveProductInline}
@@ -1034,7 +1391,69 @@ export function App() {
       {view === "dashboard" ? <Dashboard products={userData.products} priceHistory={userData.priceHistory} /> : null}
 
       {view === "history" ? <HistoryView priceHistory={userData.priceHistory} /> : null}
+      <SupabaseDebugPanel
+        enabled={showSupabaseDebug}
+        currentUser={currentUser}
+        listCount={userData.lists.length}
+        lastError={lastSupabaseError}
+        lastAuthOperation={lastAuthOperation}
+        lastAuthError={lastAuthError}
+        currentView={view}
+        lastSupabaseOperation={lastSupabaseOperation}
+        lastSupabaseTable={lastSupabaseTable}
+      />
     </main>
+  );
+}
+
+function SupabaseDebugPanel({
+  enabled,
+  currentUser,
+  listCount,
+  lastError,
+  lastAuthOperation,
+  lastAuthError,
+  currentView,
+  lastSupabaseOperation,
+  lastSupabaseTable
+}: {
+  enabled: boolean;
+  currentUser: User | null;
+  listCount: number;
+  lastError: string;
+  lastAuthOperation: string;
+  lastAuthError: string;
+  currentView: string;
+  lastSupabaseOperation: string;
+  lastSupabaseTable: string;
+}) {
+  if (!enabled) {
+    return null;
+  }
+
+  return (
+    <aside className="fixed bottom-3 left-3 z-50 max-w-[calc(100vw-1.5rem)] rounded-lg border border-supermarket-leaf/30 bg-black/80 px-3 py-2 text-[11px] font-semibold text-white shadow-xl backdrop-blur">
+      <p>Supabase configurado: {isSupabaseConfigured ? "sim" : "nao"}</p>
+      <p>
+        Fonte de dados: <span className="text-supermarket-mint">{isSupabaseConfigured ? "Supabase" : "localStorage"}</span>
+      </p>
+      <p>Fallback local: {ENABLE_LOCAL_FALLBACK ? "ativo" : "inativo"}</p>
+      <p>Tela atual: {currentView}</p>
+      <p>Auth source: Supabase</p>
+      <p>Usuario: {currentUser ? `${currentUser.name} (${currentUser.email})` : "sem sessao"}</p>
+      <p>Listas carregadas: {listCount}</p>
+      <p>Ultima operacao Auth: {lastAuthOperation || "nenhuma"}</p>
+      <p>
+        Ultima operacao Supabase: {lastSupabaseOperation || "nenhuma"}
+        {lastSupabaseTable ? ` em ${lastSupabaseTable}` : ""}
+      </p>
+      <p className={lastAuthError ? "text-red-200" : "text-supermarket-mint"}>
+        Ultimo erro Auth: {lastAuthError || "nenhum"}
+      </p>
+      <p className={lastError ? "text-red-200" : "text-supermarket-mint"}>
+        Ultimo erro Supabase: {lastError || "nenhum"}
+      </p>
+    </aside>
   );
 }
 
@@ -1062,8 +1481,8 @@ function AuthScreen({
   message: string;
   onModeChange: (mode: AuthMode) => void;
   onLogin: (email: string, password: string) => Promise<void>;
-  onRegister: (name: string, email: string, password: string, securityAnswer: string) => Promise<void>;
-  onRecover: (email: string, securityAnswer: string, newPassword: string) => Promise<void>;
+  onRegister: (name: string, email: string, password: string) => Promise<void>;
+  onRecover: (email: string) => Promise<void>;
   onPasskeyLogin: () => Promise<void>;
   onRegisterPasskey: (user: User) => Promise<void>;
   onContinueAfterPasskey: () => void;
@@ -1078,7 +1497,6 @@ function AuthScreen({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [securityAnswer, setSecurityAnswer] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -1090,10 +1508,10 @@ function AuthScreen({
         await onLogin(email, password);
       }
       if (mode === "register") {
-        await onRegister(name, email, password, securityAnswer);
+        await onRegister(name, email, password);
       }
       if (mode === "recover") {
-        await onRecover(email, securityAnswer, password);
+        await onRecover(email);
       }
     } finally {
       setIsSubmitting(false);
@@ -1102,8 +1520,14 @@ function AuthScreen({
 
   const heading =
     mode === "login" ? "Entrar no aplicativo" : mode === "register" ? "Criar sua conta" : "Recuperar senha";
-  const buttonLabel = mode === "login" ? "Acessar o App" : mode === "register" ? "Criar conta" : "Salvar nova senha";
+  const buttonLabel =
+    mode === "login"
+      ? "Acessar o App"
+      : mode === "register"
+        ? "Criar conta"
+        : "Enviar recuperacao";
   const showPasskeyActivation = mode === "login" && Boolean(pendingPasskeyUser);
+  const useSupabasePasswordReset = mode === "recover" && isSupabaseConfigured;
 
   function registerPendingPasskey() {
     if (pendingPasskeyUser) {
@@ -1192,42 +1616,40 @@ function AuthScreen({
               </div>
             </label>
 
-            <label className="auth-field">
-              <span>{mode === "recover" ? "Nova senha" : "Senha"}</span>
-              <div className="auth-input-shell">
-                <Lock size={21} aria-hidden="true" />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder={mode === "recover" ? "Nova senha" : "Senha"}
-                  autoComplete={mode === "login" ? "current-password" : "new-password"}
-                  required
-                />
-                <button
-                  className="auth-password-toggle"
-                  type="button"
-                  onClick={() => setShowPassword((current) => !current)}
-                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                  title={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                >
-                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
-              </div>
-            </label>
-
-            {mode !== "login" ? (
+            {!useSupabasePasswordReset ? (
               <label className="auth-field">
-                <span>Resposta de seguranca</span>
-                <input
-                  className="auth-input"
-                  value={securityAnswer}
-                  onChange={(event) => setSecurityAnswer(event.target.value)}
-                  placeholder="Resposta de seguranca"
-                  autoComplete="off"
-                  required
-                />
+                <span>{mode === "recover" ? "Nova senha" : "Senha"}</span>
+                <div className="auth-input-shell">
+                  <Lock size={21} aria-hidden="true" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder={mode === "recover" ? "Nova senha" : "Senha"}
+                    autoComplete={mode === "login" ? "current-password" : "new-password"}
+                    required
+                  />
+                  <button
+                    className="auth-password-toggle"
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                    title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                  >
+                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
               </label>
+            ) : (
+              <p className="auth-passkey-hint">
+                Informe seu e-mail para receber o link seguro de recuperacao de senha do Supabase.
+              </p>
+            )}
+
+            {mode === "recover" && !isSupabaseConfigured ? (
+              <p className="auth-alert auth-alert-error">
+                Supabase nao configurado. Verifique as variaveis de ambiente na Vercel.
+              </p>
             ) : null}
           </div>
 
@@ -1338,6 +1760,7 @@ function ShoppingList({
   lists,
   products,
   users,
+  shares,
   currentUserId,
   selectedListId,
   editingListId,
@@ -1351,6 +1774,9 @@ function ShoppingList({
   onCancelList,
   onSaveList,
   onDeleteList,
+  onShareList,
+  onUpdateShare,
+  onRemoveShare,
   onSaveProduct,
   onToggleBought,
   onInlineChange,
@@ -1360,6 +1786,7 @@ function ShoppingList({
   lists: ShoppingList[];
   products: Product[];
   users: User[];
+  shares: ListShare[];
   currentUserId: string;
   selectedListId: string | null;
   editingListId: string | null;
@@ -1373,6 +1800,9 @@ function ShoppingList({
   onCancelList: () => void;
   onSaveList: (form: ListForm) => void | Promise<void>;
   onDeleteList: (listId: string) => void | Promise<void>;
+  onShareList: (listId: string, form: ShareForm) => void | Promise<void>;
+  onUpdateShare: (shareId: string, permission: SharePermission) => void | Promise<void>;
+  onRemoveShare: (shareId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
@@ -1386,8 +1816,15 @@ function ShoppingList({
   const [savedProductId, setSavedProductId] = useState<string | null>(null);
   const selectedList = selectedListId ? lists.find((list) => list.id === selectedListId) ?? null : null;
   const isListOwner = selectedList ? selectedList.userId === currentUserId : true;
-  const readonlyReason = "Somente o criador da lista pode alterar.";
-  const creatorLabel = (userId: string) => {
+  const canEditProducts = selectedList ? isListOwner || selectedList.sharedPermission === "editor" : true;
+  const readonlyReason =
+    selectedList?.sharedPermission === "viewer"
+      ? "Voce tem permissao de visualizacao nesta lista."
+      : "Somente o criador ou editor pode alterar esta lista.";
+  const creatorLabel = (userId: string, list?: ShoppingList) => {
+    if (list?.ownerName || list?.ownerEmail) {
+      return `${list.ownerName ?? "Dono"} - ${list.ownerEmail ?? userId}`;
+    }
     const user = users.find((item) => item.uid === userId);
     return user ? `${user.name} - ${user.email}` : "Usuario local";
   };
@@ -1441,7 +1878,7 @@ function ShoppingList({
   const completionRate = listProducts.length > 0 ? Math.round((boughtCount / listProducts.length) * 100) : 0;
 
   function saveProductFromModal(form: ProductForm) {
-    if (!selectedList || !isListOwner) {
+    if (!selectedList || !canEditProducts) {
       return;
     }
     onSaveProduct(selectedList.id, form);
@@ -1449,7 +1886,7 @@ function ShoppingList({
   }
 
   function requestProductEdit(productId: string) {
-    if (!isListOwner) {
+    if (!canEditProducts) {
       return;
     }
     if (editingProductId && editingProductId !== productId) {
@@ -1463,7 +1900,7 @@ function ShoppingList({
   }
 
   function confirmProductEdit(productId: string, draft: ProductEditDraft) {
-    if (!isListOwner) {
+    if (!canEditProducts) {
       return;
     }
     onInlineChange(productId, draft);
@@ -1491,11 +1928,22 @@ function ShoppingList({
         </div>
 
         {editingListId && (editingListId === "new" || lists.some((list) => list.id === editingListId && list.userId === currentUserId)) ? (
-          <ListEditor
-            list={editingListId === "new" ? null : lists.find((list) => list.id === editingListId) ?? null}
-            onCancel={onCancelList}
-            onSave={onSaveList}
-          />
+          <>
+            <ListEditor
+              list={editingListId === "new" ? null : lists.find((list) => list.id === editingListId) ?? null}
+              onCancel={onCancelList}
+              onSave={onSaveList}
+            />
+            {editingListId !== "new" ? (
+              <ShareManager
+                listId={editingListId}
+                shares={shares.filter((share) => share.listId === editingListId)}
+                onShare={onShareList}
+                onUpdateShare={onUpdateShare}
+                onRemoveShare={onRemoveShare}
+              />
+            ) : null}
+          </>
         ) : null}
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1512,7 +1960,7 @@ function ShoppingList({
                     <span className="min-w-0">
                       <strong>{list.name}</strong>
                       <small>
-                        {creatorLabel(list.userId)}
+                        {creatorLabel(list.userId, list)}
                       </small>
                       <small>
                         {summary.count} {summary.count === 1 ? "item" : "itens"} - {summary.bought} comprados - {money(summary.total)}
@@ -1558,7 +2006,7 @@ function ShoppingList({
             <p className="text-sm font-black uppercase text-supermarket-leaf">Lista</p>
             <h2 className="text-2xl font-black">{selectedList.name}</h2>
             <p className="text-sm text-supermarket-ink/60">
-              {creatorLabel(selectedList.userId)} - {listProducts.length} itens - {boughtCount} comprados - {money(total)}
+              {creatorLabel(selectedList.userId, selectedList)} - {listProducts.length} itens - {boughtCount} comprados - {money(total)}
             </p>
           </div>
         </div>
@@ -1566,7 +2014,7 @@ function ShoppingList({
           <button className="list-back-button" type="button" onClick={onBackToLists}>
             Voltar
           </button>
-          {isListOwner ? (
+          {canEditProducts ? (
             <>
               <button className="button-secondary" type="button" onClick={() => setIsClearModalOpen(true)}>
                 <RefreshCcw size={16} />
@@ -1581,14 +2029,25 @@ function ShoppingList({
         </div>
       </div>
 
-      {!isListOwner ? <div className="readonly-banner">Visualizacao somente leitura. Apenas o criador pode alterar esta lista.</div> : null}
+      {!canEditProducts ? <div className="readonly-banner">Visualizacao somente leitura. {readonlyReason}</div> : null}
 
       {isListOwner && editingListId ? (
-        <ListEditor
-          list={editingListId === "new" ? null : lists.find((list) => list.id === editingListId) ?? null}
-          onCancel={onCancelList}
-          onSave={onSaveList}
-        />
+        <>
+          <ListEditor
+            list={editingListId === "new" ? null : lists.find((list) => list.id === editingListId) ?? null}
+            onCancel={onCancelList}
+            onSave={onSaveList}
+          />
+          {editingListId !== "new" ? (
+            <ShareManager
+              listId={editingListId}
+              shares={shares.filter((share) => share.listId === editingListId)}
+              onShare={onShareList}
+              onUpdateShare={onUpdateShare}
+              onRemoveShare={onRemoveShare}
+            />
+          ) : null}
+        </>
       ) : null}
 
       <div className="panel product-detail-panel">
@@ -1615,9 +2074,9 @@ function ShoppingList({
               <ProductGridRow
                 key={product.id}
                 product={product}
-                isEditing={isListOwner && editingProductId === product.id}
+                isEditing={canEditProducts && editingProductId === product.id}
                 isRecentlySaved={savedProductId === product.id}
-                readOnly={!isListOwner}
+                readOnly={!canEditProducts}
                 readOnlyReason={readonlyReason}
                 onRequestEdit={requestProductEdit}
                 onCancelEdit={() => setEditingProductId(null)}
@@ -1636,8 +2095,8 @@ function ShoppingList({
         </div>
       </div>
 
-      {isListOwner && isProductModalOpen ? <ProductModal onCancel={() => setIsProductModalOpen(false)} onSave={saveProductFromModal} /> : null}
-      {isListOwner && isClearModalOpen ? (
+      {canEditProducts && isProductModalOpen ? <ProductModal onCancel={() => setIsProductModalOpen(false)} onSave={saveProductFromModal} /> : null}
+      {canEditProducts && isClearModalOpen ? (
         <ClearFieldsModal
           onCancel={() => setIsClearModalOpen(false)}
           onConfirm={(fields) => {
@@ -2079,16 +2538,139 @@ function ListEditor({
   );
 }
 
+function ShareManager({
+  listId,
+  shares,
+  onShare,
+  onUpdateShare,
+  onRemoveShare
+}: {
+  listId: string;
+  shares: ListShare[];
+  onShare: (listId: string, form: ShareForm) => void | Promise<void>;
+  onUpdateShare: (shareId: string, permission: SharePermission) => void | Promise<void>;
+  onRemoveShare: (shareId: string) => void | Promise<void>;
+}) {
+  const [form, setForm] = useState<ShareForm>({ email: "", permission: "viewer" });
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (!form.email.trim()) {
+      setError("Informe o e-mail do usuario.");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onShare(listId, form);
+      setForm({ email: "", permission: "viewer" });
+      setMessage("Lista compartilhada com sucesso.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel compartilhar a lista.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <section className="mb-5 rounded-[2rem] bg-white p-5 shadow-soft">
+      <div className="mb-4">
+        <p className="text-sm font-bold uppercase text-supermarket-leaf">Compartilhar lista</p>
+        <h3 className="text-xl font-black">Usuarios com acesso</h3>
+      </div>
+      <form className="grid gap-3 sm:grid-cols-[1fr_150px_auto]" onSubmit={submit}>
+        <label className="field">
+          <span>E-mail do usuario</span>
+          <input
+            className="input"
+            type="email"
+            value={form.email}
+            onChange={(event) => setForm({ ...form, email: event.target.value })}
+            placeholder="pessoa@email.com"
+          />
+        </label>
+        <label className="field">
+          <span>Permissao</span>
+          <select
+            className="input"
+            value={form.permission}
+            onChange={(event) => setForm({ ...form, permission: event.target.value as SharePermission })}
+          >
+            <option value="viewer">Viewer</option>
+            <option value="editor">Editor</option>
+          </select>
+        </label>
+        <button className="button-primary self-end justify-center" type="submit" disabled={isSaving}>
+          <Plus size={16} />
+          {isSaving ? "Salvando..." : "Compartilhar"}
+        </button>
+      </form>
+      {message ? <p className="mt-4 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</p> : null}
+      {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+      <div className="mt-4 grid gap-2">
+        {shares.length === 0 ? (
+          <p className="text-sm font-semibold text-supermarket-ink/60">Nenhum usuario compartilhado.</p>
+        ) : (
+          shares.map((share) => (
+            <div className="flex flex-col gap-2 rounded-2xl border border-supermarket-ink/10 p-3 sm:flex-row sm:items-center sm:justify-between" key={share.id}>
+              <div className="min-w-0">
+                <strong className="block truncate">{share.sharedUserName}</strong>
+                <span className="block truncate text-sm font-semibold text-supermarket-ink/60">{share.sharedUserEmail}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  className="input min-w-[120px]"
+                  value={share.permission}
+                  onChange={(event) => {
+                    void Promise.resolve(onUpdateShare(share.id, event.target.value as SharePermission)).catch((err) => {
+                      window.alert(err instanceof Error ? err.message : "Nao foi possivel atualizar a permissao.");
+                    });
+                  }}
+                >
+                  <option value="viewer">Viewer</option>
+                  <option value="editor">Editor</option>
+                </select>
+                <button
+                  className="icon-button danger-icon-button"
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm("Remover compartilhamento?")) {
+                      void Promise.resolve(onRemoveShare(share.id)).catch((err) => {
+                        window.alert(err instanceof Error ? err.message : "Nao foi possivel remover compartilhamento.");
+                      });
+                    }
+                  }}
+                  aria-label="Remover compartilhamento"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
 function SharedLists({
   users,
   lists,
   products,
+  shares,
   currentUserId,
   editingListId,
   onEditList,
   onCancelList,
   onSaveList,
   onDeleteList,
+  onShareList,
+  onUpdateShare,
+  onRemoveShare,
   onSaveProduct,
   onToggleBought,
   onInlineChange,
@@ -2098,12 +2680,16 @@ function SharedLists({
   users: User[];
   lists: ShoppingList[];
   products: Product[];
+  shares: ListShare[];
   currentUserId: string;
   editingListId: string | null;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
   onSaveList: (form: ListForm) => void | Promise<void>;
   onDeleteList: (listId: string) => void | Promise<void>;
+  onShareList: (listId: string, form: ShareForm) => void | Promise<void>;
+  onUpdateShare: (shareId: string, permission: SharePermission) => void | Promise<void>;
+  onRemoveShare: (shareId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
@@ -2113,14 +2699,18 @@ function SharedLists({
   return (
     <SharedListsContent
       users={users}
-      lists={lists}
+      lists={lists.filter((list) => list.sharedPermission)}
       products={products}
+      shares={shares}
       currentUserId={currentUserId}
       editingListId={editingListId}
       onEditList={onEditList}
       onCancelList={onCancelList}
       onSaveList={onSaveList}
       onDeleteList={onDeleteList}
+      onShareList={onShareList}
+      onUpdateShare={onUpdateShare}
+      onRemoveShare={onRemoveShare}
       onSaveProduct={onSaveProduct}
       onToggleBought={onToggleBought}
       onInlineChange={onInlineChange}
@@ -2134,12 +2724,16 @@ function SharedListsContent(props: {
   users: User[];
   lists: ShoppingList[];
   products: Product[];
+  shares: ListShare[];
   currentUserId: string;
   editingListId: string | null;
   onEditList: (listId: string) => void;
   onCancelList: () => void;
   onSaveList: (form: ListForm) => void | Promise<void>;
   onDeleteList: (listId: string) => void | Promise<void>;
+  onShareList: (listId: string, form: ShareForm) => void | Promise<void>;
+  onUpdateShare: (shareId: string, permission: SharePermission) => void | Promise<void>;
+  onRemoveShare: (shareId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
@@ -2153,11 +2747,12 @@ function SharedListsContent(props: {
       lists={props.lists}
       products={props.products}
       users={props.users}
+      shares={props.shares}
       currentUserId={props.currentUserId}
       selectedListId={selectedSharedListId}
       editingListId={props.editingListId}
       title="Outras listas"
-      description="Visualize listas de todos os usuarios cadastrados neste navegador."
+      description="Visualize listas compartilhadas com voce pelo Supabase."
       allowCreateList={false}
       onSelectList={setSelectedSharedListId}
       onBackToLists={() => setSelectedSharedListId(null)}
@@ -2166,6 +2761,9 @@ function SharedListsContent(props: {
       onCancelList={props.onCancelList}
       onSaveList={props.onSaveList}
       onDeleteList={props.onDeleteList}
+      onShareList={props.onShareList}
+      onUpdateShare={props.onUpdateShare}
+      onRemoveShare={props.onRemoveShare}
       onSaveProduct={props.onSaveProduct}
       onToggleBought={props.onToggleBought}
       onInlineChange={props.onInlineChange}
