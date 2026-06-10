@@ -164,6 +164,7 @@ O app pode ser testado manualmente com Supabase direto para:
 Condicoes obrigatorias:
 
 - aplicar `prisma/migrations/20260605183000_snake_case_columns_for_supabase_client/migration.sql`;
+- se o banco ja estiver parcialmente em snake_case e retornar `ERROR: 42703`, aplicar `docs/manual-supabase-safe-snake-case-migration.sql` no lugar da migration snake_case original;
 - aplicar `docs/supabase-direct-client-rls.sql`;
 - configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`;
 - fazer novo deploy apos configurar variaveis;

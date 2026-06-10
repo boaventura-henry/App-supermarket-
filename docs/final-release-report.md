@@ -70,6 +70,16 @@ Migrations pendentes no banco conectado:
 20260610120000_add_remote_list_shares
 ```
 
+Observacao de execucao manual:
+
+- A migration `20260605183000_snake_case_columns_for_supabase_client` original assume que as colunas ainda estao em camelCase.
+- Em bancos parcialmente migrados, o Supabase pode retornar `ERROR: 42703: column "legacyId" does not exist`.
+- Para execucao manual pelo SQL Editor, use a versao segura/idempotente:
+
+```text
+docs/manual-supabase-safe-snake-case-migration.sql
+```
+
 ## Status Supabase
 
 Verificado:
@@ -189,19 +199,33 @@ Confirmado:
 
 ## Pendencias Antes Do Merge
 
-1. Aplicar migrations no Supabase:
+1. Se for aplicar pelo Supabase SQL Editor, execute primeiro:
+
+```text
+docs/manual-supabase-safe-snake-case-migration.sql
+```
+
+2. Depois aplique:
+
+```text
+prisma/migrations/20260610115500_add_uuid_defaults_for_supabase_client/migration.sql
+prisma/migrations/20260610120000_add_remote_list_shares/migration.sql
+docs/supabase-direct-client-rls.sql
+```
+
+3. Se for aplicar via Prisma em um banco ainda nao parcialmente migrado, use:
 
 ```bash
 npm exec -- prisma migrate deploy
 ```
 
-2. Aplicar/validar RLS:
+4. Aplicar/validar RLS:
 
 ```text
 docs/supabase-direct-client-rls.sql
 ```
 
-3. Rodar novamente:
+5. Rodar novamente:
 
 ```bash
 npm exec -- prisma migrate status
@@ -210,7 +234,7 @@ npm run build
 npm exec -- prisma validate
 ```
 
-4. Se tudo passar, fazer merge da branch na `main` e executar push.
+6. Se tudo passar, fazer merge da branch na `main` e executar push.
 
 ## Resultado Final
 
