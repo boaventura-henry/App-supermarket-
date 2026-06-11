@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   ArrowUpDown,
   BarChart3,
@@ -591,6 +591,20 @@ export function App() {
 
   function userNeedsPasskeyOffer(user: User) {
     return passkeySupported && !database.passkeys.some((passkey) => passkey.userId === user.uid);
+  }
+
+  function resetAuthMessages() {
+    setAuthError("");
+    setAuthMessage("");
+    setPasskeyError("");
+    setPasskeyMessage("");
+    setIsPasskeyBusy(false);
+  }
+
+  function changeAuthMode(mode: AuthMode) {
+    resetAuthMessages();
+    setPendingPasskeyUserId(null);
+    setAuthMode(mode);
   }
 
   function finishAuthenticatedLogin(user: User) {
@@ -1260,11 +1274,7 @@ export function App() {
           mode={authMode}
           error={authError}
           message={authMessage}
-          onModeChange={(mode) => {
-            setAuthMode(mode);
-            setAuthError("");
-            setAuthMessage("");
-          }}
+          onModeChange={changeAuthMode}
           onLogin={handleLogin}
           onRegister={handleRegister}
           onRecover={handleRecover}
@@ -1499,6 +1509,40 @@ function AuthScreen({
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const resetLoginForm = useCallback(() => {
+    setEmail("");
+    setPassword("");
+    setShowPassword(false);
+    setIsSubmitting(false);
+  }, []);
+
+  const resetSignupForm = useCallback(() => {
+    setName("");
+    setEmail("");
+    setPassword("");
+    setShowPassword(false);
+    setIsSubmitting(false);
+  }, []);
+
+  const resetRecoverForm = useCallback(() => {
+    setEmail("");
+    setPassword("");
+    setShowPassword(false);
+    setIsSubmitting(false);
+  }, []);
+
+  useEffect(() => {
+    if (mode === "login") {
+      resetLoginForm();
+      return;
+    }
+    if (mode === "register") {
+      resetSignupForm();
+      return;
+    }
+    resetRecoverForm();
+  }, [mode, resetLoginForm, resetRecoverForm, resetSignupForm]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
