@@ -3499,7 +3499,7 @@ function SideMenu({
             Outras listas
           </NavButton>
           <NavButton active={currentView === "sharing"} onClick={() => onNavigate("sharing")}>
-            Compartilhamentos
+            Compartilhar listas
           </NavButton>
           <NavButton active={currentView === "dashboard"} onClick={() => onNavigate("dashboard")}>
             Dashboard
