@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   ArrowUpDown,
   BarChart3,
@@ -922,7 +922,7 @@ export function App() {
     setListShares((current) => current.filter((share) => share.id !== shareId));
   }
 
-  function saveProduct(listId: string, form: ProductForm) {
+  async function saveProduct(listId: string, form: ProductForm) {
     if (!currentUser) {
       return;
     }
@@ -948,39 +948,42 @@ export function App() {
     if (USE_REMOTE_PRODUCTS) {
       setLastSupabaseOperation("insert");
       setLastSupabaseTable("products");
-      void createRemoteProduct(listId, currentUser, {
-        name,
-        brand,
-        quantity,
-        unitPrice,
-        supermarket
-      })
-        .then((product) => {
-          updateDatabase((current) => ({
-            ...upsertProduct(current, product),
-            priceHistory:
-              !USE_REMOTE_PRICE_HISTORY && unitPrice !== null && unitPrice > 0
-                ? [
-                    ...current.priceHistory,
-                    {
-                      id: createId("hist"),
-                      userId: currentUser.uid,
-                      listId,
-                      productName: name,
-                      brand,
-                      price: unitPrice,
-                      supermarket,
-                      timestamp
-                    }
-                  ]
-                : current.priceHistory,
-            lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
-          }));
-          void refreshRemotePriceHistory(currentUser).catch((error) =>
-            reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
-          );
-        })
-        .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o produto."));
+      try {
+        const product = await createRemoteProduct(listId, currentUser, {
+          name,
+          brand,
+          quantity,
+          unitPrice,
+          supermarket
+        });
+        updateDatabase((current) => ({
+          ...upsertProduct(current, product),
+          priceHistory:
+            !USE_REMOTE_PRICE_HISTORY && unitPrice !== null && unitPrice > 0
+              ? [
+                  ...current.priceHistory,
+                  {
+                    id: createId("hist"),
+                    userId: currentUser.uid,
+                    listId,
+                    productName: name,
+                    brand,
+                    price: unitPrice,
+                    supermarket,
+                    timestamp
+                  }
+                ]
+              : current.priceHistory,
+          lists: current.lists.map((list) => (list.id === listId ? { ...list, updatedAt: timestamp } : list))
+        }));
+        void refreshRemotePriceHistory(currentUser).catch((error) =>
+          reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
+        );
+      } catch (error) {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel salvar o produto."));
+        console.error("Nao foi possivel salvar o produto.", error);
+        throw new Error("Nao foi possivel salvar o produto. Tente novamente.");
+      }
       return;
     }
 
@@ -1847,7 +1850,7 @@ function ShoppingList({
   onShareList: (listId: string, form: ShareForm) => void | Promise<void>;
   onUpdateShare: (shareId: string, permission: SharePermission) => void | Promise<void>;
   onRemoveShare: (shareId: string) => void | Promise<void>;
-  onSaveProduct: (listId: string, form: ProductForm) => void;
+  onSaveProduct: (listId: string, form: ProductForm) => void | Promise<void>;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
   onClearFields: (listId: string, fields: ClearProductFields) => void;
@@ -1925,8 +1928,7 @@ function ShoppingList({
     if (!selectedList || !canEditProducts) {
       return;
     }
-    onSaveProduct(selectedList.id, form);
-    setIsProductModalOpen(false);
+    return onSaveProduct(selectedList.id, form);
   }
 
   function requestProductEdit(productId: string) {
@@ -2342,23 +2344,50 @@ function ProductGridRow({
   );
 }
 
-function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (form: ProductForm) => void }) {
+function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (form: ProductForm) => void | Promise<void> }) {
   const [form, setForm] = useState<ProductForm>(emptyProductForm);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
-  function submit(event: FormEvent) {
+  useEffect(() => {
+    if (!successMessage) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setSuccessMessage(""), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [successMessage]);
+
+  function updateField(field: keyof ProductForm, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+    setError("");
+    setSuccessMessage("");
+  }
+
+  async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setSuccessMessage("");
+    setIsSaving(true);
     try {
-      onSave(form);
+      await onSave(form);
       setForm(emptyProductForm);
+      setSuccessMessage("Produto cadastrado com sucesso.");
+      window.setTimeout(() => nameInputRef.current?.focus(), 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel salvar o produto.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
+    <div className="modal-backdrop" role="presentation" onMouseDown={() => {
+      if (!isSaving) {
+        onCancel();
+      }
+    }}>
       <form className="product-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
         <div className="mb-5 flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
@@ -2370,7 +2399,7 @@ function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (for
               <h4 className="text-xl font-black">Cadastrar item</h4>
             </div>
           </div>
-          <button className="icon-button" type="button" onClick={onCancel} aria-label="Fechar cadastro de produto">
+          <button className="icon-button" type="button" onClick={onCancel} aria-label="Fechar cadastro de produto" disabled={isSaving}>
             <X size={18} />
           </button>
         </div>
@@ -2379,9 +2408,10 @@ function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (for
           <label className="field">
             <span>Nome do produto *</span>
             <input
+              ref={nameInputRef}
               className="input"
               value={form.name}
-              onChange={(event) => setForm({ ...form, name: event.target.value })}
+              onChange={(event) => updateField("name", event.target.value)}
               placeholder="Ex.: Arroz, leite, cafe..."
               autoFocus
             />
@@ -2391,7 +2421,7 @@ function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (for
             <input
               className="input"
               value={form.brand}
-              onChange={(event) => setForm({ ...form, brand: event.target.value })}
+              onChange={(event) => updateField("brand", event.target.value)}
               placeholder="Opcional"
             />
           </label>
@@ -2402,7 +2432,7 @@ function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (for
                 className="input"
                 inputMode="decimal"
                 value={form.quantity}
-                onChange={(event) => setForm({ ...form, quantity: event.target.value })}
+                onChange={(event) => updateField("quantity", event.target.value)}
                 placeholder="Opcional"
               />
             </label>
@@ -2412,7 +2442,7 @@ function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (for
                 className="input"
                 inputMode="decimal"
                 value={form.unitPrice}
-                onChange={(event) => setForm({ ...form, unitPrice: event.target.value })}
+                onChange={(event) => updateField("unitPrice", event.target.value)}
                 placeholder="Opcional"
               />
             </label>
@@ -2422,20 +2452,23 @@ function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (for
             <input
               className="input"
               value={form.supermarket}
-              onChange={(event) => setForm({ ...form, supermarket: event.target.value })}
+              onChange={(event) => updateField("supermarket", event.target.value)}
               placeholder="Opcional"
             />
           </label>
         </div>
 
         {error ? <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+        {successMessage ? (
+          <p className="mt-4 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{successMessage}</p>
+        ) : null}
         <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button className="button-secondary justify-center" type="button" onClick={onCancel}>
-            Cancelar
+          <button className="button-secondary justify-center" type="button" onClick={onCancel} disabled={isSaving}>
+            Fechar
           </button>
-          <button className="button-primary justify-center" type="submit">
+          <button className="button-primary justify-center" type="submit" disabled={isSaving}>
             <Plus size={18} />
-            Adicionar produto
+            {isSaving ? "Salvando..." : "Adicionar produto"}
           </button>
         </div>
       </form>
@@ -2734,7 +2767,7 @@ function SharedLists({
   onShareList: (listId: string, form: ShareForm) => void | Promise<void>;
   onUpdateShare: (shareId: string, permission: SharePermission) => void | Promise<void>;
   onRemoveShare: (shareId: string) => void | Promise<void>;
-  onSaveProduct: (listId: string, form: ProductForm) => void;
+  onSaveProduct: (listId: string, form: ProductForm) => void | Promise<void>;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
   onClearFields: (listId: string, fields: ClearProductFields) => void;
@@ -2778,7 +2811,7 @@ function SharedListsContent(props: {
   onShareList: (listId: string, form: ShareForm) => void | Promise<void>;
   onUpdateShare: (shareId: string, permission: SharePermission) => void | Promise<void>;
   onRemoveShare: (shareId: string) => void | Promise<void>;
-  onSaveProduct: (listId: string, form: ProductForm) => void;
+  onSaveProduct: (listId: string, form: ProductForm) => void | Promise<void>;
   onToggleBought: (productId: string) => void;
   onInlineChange: (productId: string, draft: ProductEditDraft) => void;
   onClearFields: (listId: string, fields: ClearProductFields) => void;
