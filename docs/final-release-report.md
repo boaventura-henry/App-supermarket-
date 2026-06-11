@@ -4,9 +4,58 @@ Data: 2026-06-10
 
 ## Status
 
-Publicacao na `main`: bloqueada.
+Publicacao na `main`: liberada para merge, aguardando decisao de publicacao.
 
-Motivo: o banco Supabase conectado ainda possui migrations pendentes. Pela regra de seguranca desta release, nao foi feito merge nem push enquanto houver migration pendente.
+Motivo: schema real do Supabase validado, RLS validado, migrations reconciliadas no Prisma e validacoes finais aprovadas.
+
+Atualizacao apos execucao manual no Supabase SQL Editor:
+
+- O SQL manual seguro de snake_case foi executado pelo usuario.
+- A migration de UUID defaults foi executada pelo usuario.
+- A migration `list_shares` foi executada pelo usuario.
+- O SQL de RLS foi executado pelo usuario.
+- Mesmo assim, `npm exec -- prisma migrate status` ainda lista migrations pendentes, porque a execucao manual pelo SQL Editor nao registra automaticamente as migrations na tabela `_prisma_migrations`.
+- As migrations foram reconciliadas com `npm exec -- prisma migrate resolve --applied ...`.
+- O status final do Prisma agora retorna `Database schema is up to date!`.
+
+## Schema Real Validado
+
+Validacao executada com `npm exec -- prisma db execute --stdin --schema prisma/schema.prisma` usando um bloco SQL de checagem.
+
+Tabelas obrigatorias validadas:
+
+- `profiles`
+- `shopping_lists`
+- `products`
+- `price_history`
+- `passkey_credentials`
+- `list_shares`
+
+Colunas principais validadas:
+
+- `user_id`
+- `list_id`
+- `product_id`
+- `unit_price`
+- `sort_order`
+- `product_name`
+- `credential_id`
+- `public_key`
+- `owner_user_id`
+- `shared_user_id`
+- `permission`
+- `created_at`
+- `updated_at`
+
+RLS validado:
+
+- RLS ativo em `profiles`
+- RLS ativo em `shopping_lists`
+- RLS ativo em `products`
+- RLS ativo em `price_history`
+- RLS ativo em `passkey_credentials`
+- RLS ativo em `list_shares`
+- `_prisma_migrations` sem exigencia de RLS.
 
 ## Branch Revisada
 
@@ -26,6 +75,8 @@ npm run lint
 
 Resultado: aprovado.
 
+Validacao mais recente: aprovado.
+
 ### Build
 
 Comando:
@@ -35,6 +86,8 @@ npm run build
 ```
 
 Resultado: aprovado.
+
+Validacao mais recente: aprovado.
 
 Resumo do build:
 
@@ -52,6 +105,8 @@ npm exec -- prisma validate
 
 Resultado: aprovado.
 
+Validacao mais recente: aprovado.
+
 ### Prisma Migrate Status
 
 Comando:
@@ -60,7 +115,7 @@ Comando:
 npm exec -- prisma migrate status
 ```
 
-Resultado: bloqueado por migrations pendentes.
+Resultado anterior: bloqueado por migrations pendentes.
 
 Migrations pendentes no banco conectado:
 
@@ -68,6 +123,37 @@ Migrations pendentes no banco conectado:
 20260605183000_snake_case_columns_for_supabase_client
 20260610115500_add_uuid_defaults_for_supabase_client
 20260610120000_add_remote_list_shares
+```
+
+Resultado mais recente: aprovado.
+
+Comando executado:
+
+```bash
+npm exec -- prisma migrate status
+```
+
+Saida relevante:
+
+```text
+Following migrations have not yet been applied:
+20260605183000_snake_case_columns_for_supabase_client
+20260610115500_add_uuid_defaults_for_supabase_client
+20260610120000_add_remote_list_shares
+```
+
+Saida final relevante:
+
+```text
+Database schema is up to date!
+```
+
+Migrations reconciliadas:
+
+```bash
+npm exec -- prisma migrate resolve --applied 20260605183000_snake_case_columns_for_supabase_client
+npm exec -- prisma migrate resolve --applied 20260610115500_add_uuid_defaults_for_supabase_client
+npm exec -- prisma migrate resolve --applied 20260610120000_add_remote_list_shares
 ```
 
 Observacao de execucao manual:
@@ -126,11 +212,12 @@ Schema Prisma contem:
 - `passkey_credentials`
 - `list_shares`
 
-Bloqueio:
+Status:
 
-- `list_shares` ainda nao foi aplicada no banco conectado.
-- A migration snake_case tambem esta pendente.
-- A migration de defaults UUID tambem esta pendente.
+- `list_shares` aplicada e validada.
+- Migration snake_case aplicada manualmente e reconciliada.
+- Migration de defaults UUID aplicada manualmente e reconciliada.
+- Prisma migration history sincronizado.
 
 ## Status Dashboard, Relatorios e Totalizadores
 
@@ -141,7 +228,7 @@ Status de codigo:
 - Totalizadores usam produtos remotos da lista atual.
 - Listas compartilhadas foram incluidas no fluxo remoto.
 
-Validacao manual em producao: pendente, porque as migrations ainda nao foram aplicadas.
+Validacao manual em producao: liberada para teste apos merge/deploy.
 
 ## Arquivos Modificados
 
@@ -199,6 +286,58 @@ Confirmado:
 
 ## Pendencias Antes Do Merge
 
+Status: nenhuma pendencia tecnica bloqueante encontrada.
+
+Historico de validacao concluido:
+
+1. Confirmado no Supabase via SQL que o schema esta aplicado:
+
+```sql
+select table_name, column_name
+from information_schema.columns
+where table_schema = 'public'
+  and table_name in ('profiles', 'shopping_lists', 'products', 'price_history', 'passkey_credentials', 'list_shares')
+order by table_name, ordinal_position;
+```
+
+2. Confirmar que `list_shares` existe:
+
+```sql
+select to_regclass('public.list_shares') as list_shares_table;
+```
+
+3. Confirmado que as migrations manuais deveriam ser marcadas como aplicadas no Prisma.
+
+Se o schema estiver correto, reconciliar o historico do Prisma com:
+
+```bash
+npm exec -- prisma migrate resolve --applied 20260605183000_snake_case_columns_for_supabase_client
+npm exec -- prisma migrate resolve --applied 20260610115500_add_uuid_defaults_for_supabase_client
+npm exec -- prisma migrate resolve --applied 20260610120000_add_remote_list_shares
+```
+
+4. Rodado novamente com sucesso:
+
+```bash
+npm exec -- prisma migrate status
+npm run lint
+npm run build
+npm exec -- prisma validate
+```
+
+5. Resultado: branch liberada para merge na `main`.
+
+Referencia de aplicacao manual ja usada:
+
+```text
+docs/manual-supabase-safe-snake-case-migration.sql
+prisma/migrations/20260610115500_add_uuid_defaults_for_supabase_client/migration.sql
+prisma/migrations/20260610120000_add_remote_list_shares/migration.sql
+docs/supabase-direct-client-rls.sql
+```
+
+Historico anterior:
+
 1. Se for aplicar pelo Supabase SQL Editor, execute primeiro:
 
 ```text
@@ -243,6 +382,8 @@ Merge realizado: nao.
 Push realizado: nao.
 
 Deploy Vercel iniciado: nao.
+
+Branch liberada para merge: sim.
 
 URL de producao atual:
 
