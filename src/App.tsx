@@ -681,7 +681,7 @@ export function App() {
       setLastSupabaseError("");
       if (result.needsEmailConfirmation) {
         setAuthMode("login");
-        setAuthMessage("Conta criada no Supabase. Confirme seu e-mail antes de entrar.");
+        setAuthMessage("Conta criada. Verifique seu e-mail para confirmar o cadastro antes de entrar.");
         return;
       }
       updateDatabase((current) => mergeAuthenticatedUser(current, result.user));

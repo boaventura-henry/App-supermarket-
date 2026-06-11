@@ -16,6 +16,7 @@ export type AuthOperation =
 export type AuthDiagnostic = {
   operation: AuthOperation;
   message: string;
+  supabaseMessage?: string;
   code?: string;
   details?: string;
   hint?: string;
@@ -188,6 +189,7 @@ export function logAuthError(error: unknown) {
   console.error("Supabase Auth error", {
     operation: diagnostic.operation,
     message: diagnostic.message,
+    supabaseMessage: diagnostic.supabaseMessage,
     code: diagnostic.code,
     details: diagnostic.details,
     hint: diagnostic.hint
@@ -195,7 +197,7 @@ export function logAuthError(error: unknown) {
 }
 
 function toAuthError(operation: AuthOperation, error?: SupabaseErrorLike | AuthError | null, fallback?: string) {
-  return createAuthError(operation, error?.message || fallback || "Erro no Supabase Auth.", error ?? undefined);
+  return createAuthError(operation, getFriendlyAuthMessage(operation, error, fallback), error ?? undefined);
 }
 
 function createAuthError(operation: AuthOperation, message: string, error?: SupabaseErrorLike) {
@@ -203,11 +205,63 @@ function createAuthError(operation: AuthOperation, message: string, error?: Supa
   authError.diagnostic = {
     operation,
     message,
+    supabaseMessage: error?.message,
     code: error?.code,
     details: error?.details,
     hint: error?.hint
   };
   return authError;
+}
+
+function getFriendlyAuthMessage(operation: AuthOperation, error?: SupabaseErrorLike | AuthError | null, fallback?: string) {
+  const rawMessage = error?.message?.trim() ?? "";
+  const normalized = rawMessage.toLowerCase();
+  const code = "code" in (error ?? {}) ? (error as SupabaseErrorLike).code?.toLowerCase() : "";
+
+  if (!rawMessage) {
+    return fallback || "Nao foi possivel concluir a autenticacao.";
+  }
+
+  if (operation === "signIn") {
+    if (code === "email_not_confirmed" || normalized.includes("email not confirmed") || normalized.includes("not confirmed")) {
+      return "E-mail ainda nao confirmado. Verifique sua caixa de entrada antes de entrar.";
+    }
+    if (
+      code === "invalid_credentials" ||
+      normalized.includes("invalid login credentials") ||
+      normalized.includes("invalid credentials")
+    ) {
+      return "E-mail ou senha incorretos. Confirme os dados ou crie uma conta antes de entrar.";
+    }
+    if (normalized.includes("network") || normalized.includes("failed to fetch")) {
+      return "Nao foi possivel conectar ao Supabase. Verifique sua conexao e tente novamente.";
+    }
+    return fallback || rawMessage;
+  }
+
+  if (operation === "signUp") {
+    if (
+      code === "user_already_exists" ||
+      normalized.includes("already registered") ||
+      normalized.includes("already exists") ||
+      normalized.includes("user already registered")
+    ) {
+      return "Ja existe uma conta com este e-mail. Entre com sua senha ou recupere o acesso.";
+    }
+    if (normalized.includes("password") && normalized.includes("characters")) {
+      return "A senha nao atende aos requisitos minimos do Supabase.";
+    }
+    return fallback || rawMessage;
+  }
+
+  if (operation === "resetPassword") {
+    if (normalized.includes("rate limit")) {
+      return "Muitas tentativas de recuperacao. Aguarde alguns minutos e tente novamente.";
+    }
+    return fallback || rawMessage;
+  }
+
+  return fallback || rawMessage;
 }
 
 function isAuthDiagnostic(error: unknown): error is Error & { diagnostic: AuthDiagnostic } {
