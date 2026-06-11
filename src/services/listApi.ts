@@ -1,71 +1,115 @@
 import type { ShoppingList, User } from "../types";
+import { isSupabaseConfigured, requireSupabaseClient } from "../lib/supabaseClient";
+import { getSharedLists } from "./shareApi";
 
-export const USE_REMOTE_LISTS = import.meta.env.VITE_USE_REMOTE_LISTS === "true";
+export const USE_REMOTE_LISTS = isSupabaseConfigured;
 
 export type RemoteShoppingList = {
   id: string;
-  legacyId: string | null;
-  userId: string;
+  legacy_id?: string | null;
+  user_id: string;
   name: string;
   color: string;
-  createdAt: string;
-  updatedAt: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ListIdentity = Pick<User, "uid" | "email" | "name">;
 
-export function toLocalShoppingList(list: RemoteShoppingList, localUserId: string): ShoppingList {
+export function toLocalShoppingList(list: RemoteShoppingList, localUserId = list.user_id): ShoppingList {
   return {
     id: list.id,
     userId: localUserId,
     name: list.name,
     color: list.color,
-    createdAt: new Date(list.createdAt).getTime(),
-    updatedAt: new Date(list.updatedAt).getTime()
+    createdAt: Date.parse(list.created_at),
+    updatedAt: Date.parse(list.updated_at)
   };
 }
 
-export function getLists(identity: ListIdentity) {
-  return request<RemoteShoppingList[]>("/api/lists", identity);
-}
+export async function getLists(identity: ListIdentity) {
+  const supabase = requireSupabaseClient();
+  const { data, error } = await supabase
+    .from("shopping_lists")
+    .select("id, legacy_id, user_id, name, color, created_at, updated_at")
+    .eq("user_id", identity.uid)
+    .order("created_at", { ascending: true });
 
-export function getList(id: string, identity: ListIdentity) {
-  return request<RemoteShoppingList>(`/api/lists/${encodeURIComponent(id)}`, identity);
-}
-
-export function createList(identity: ListIdentity, payload: { name: string; color: string }) {
-  return request<RemoteShoppingList>("/api/lists", identity, {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
-}
-
-export function updateList(id: string, identity: ListIdentity, payload: { name: string; color: string }) {
-  return request<RemoteShoppingList>(`/api/lists/${encodeURIComponent(id)}`, identity, {
-    method: "PUT",
-    body: JSON.stringify(payload)
-  });
-}
-
-export function deleteList(id: string, identity: ListIdentity) {
-  return request<{ id: string }>(`/api/lists/${encodeURIComponent(id)}`, identity, {
-    method: "DELETE"
-  });
-}
-
-async function request<T>(url: string, identity: ListIdentity, init: RequestInit = {}) {
-  const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
-  headers.set("x-superlist-user-id", encodeURIComponent(identity.uid));
-  headers.set("x-superlist-user-email", encodeURIComponent(identity.email));
-  headers.set("x-superlist-user-name", encodeURIComponent(identity.name));
-
-  const response = await fetch(url, { ...init, headers });
-  const body = (await response.json()) as { success: boolean; message?: string; data?: T };
-
-  if (!response.ok || !body.success) {
-    throw new Error(body.message ?? "Nao foi possivel acessar a API de listas.");
+  if (error) {
+    throw new Error(`Nao foi possivel carregar as listas: ${error.message}`);
   }
 
-  return body.data as T;
+  const ownedLists = ((data ?? []) as RemoteShoppingList[]).map((list) => toLocalShoppingList(list, identity.uid));
+  const sharedLists = await getSharedLists(identity);
+  return [...ownedLists, ...sharedLists];
+}
+
+export async function getList(id: string, identity: ListIdentity) {
+  void identity;
+  const supabase = requireSupabaseClient();
+  const { data, error } = await supabase
+    .from("shopping_lists")
+    .select("id, legacy_id, user_id, name, color, created_at, updated_at")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    throw new Error(`Lista nao encontrada: ${error.message}`);
+  }
+
+  return toLocalShoppingList(data as RemoteShoppingList);
+}
+
+export async function createList(identity: ListIdentity, payload: { name: string; color: string }) {
+  const supabase = requireSupabaseClient();
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("shopping_lists")
+    .insert({
+      user_id: identity.uid,
+      name: payload.name.trim(),
+      color: payload.color,
+      created_at: now,
+      updated_at: now
+    })
+    .select("id, legacy_id, user_id, name, color, created_at, updated_at")
+    .single();
+
+  if (error) {
+    throw new Error(`Nao foi possivel criar a lista: ${error.message}`);
+  }
+
+  return data as RemoteShoppingList;
+}
+
+export async function updateList(id: string, identity: ListIdentity, payload: { name: string; color: string }) {
+  const supabase = requireSupabaseClient();
+  const { data, error } = await supabase
+    .from("shopping_lists")
+    .update({
+      name: payload.name.trim(),
+      color: payload.color,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", id)
+    .eq("user_id", identity.uid)
+    .select("id, legacy_id, user_id, name, color, created_at, updated_at")
+    .single();
+
+  if (error) {
+    throw new Error(`Nao foi possivel atualizar a lista: ${error.message}`);
+  }
+
+  return data as RemoteShoppingList;
+}
+
+export async function deleteList(id: string, identity: ListIdentity) {
+  const supabase = requireSupabaseClient();
+  const { error } = await supabase.from("shopping_lists").delete().eq("id", id).eq("user_id", identity.uid);
+
+  if (error) {
+    throw new Error(`Nao foi possivel excluir a lista: ${error.message}`);
+  }
+
+  return { id };
 }

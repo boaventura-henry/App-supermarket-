@@ -16,6 +16,33 @@ Como a Netlify hospeda frontend estatico e funcoes serverless, o app Android foi
 
 Na versao Netlify, os dados ficam em um banco local do navegador (`localStorage`) com todos os registros separados por `userId`. Isso permite uso multiusuario no mesmo navegador sem depender de credenciais externas. Para sincronizacao entre dispositivos, a camada `src/storage.ts` pode ser substituida por Firebase, Supabase ou outro backend persistente mantendo os mesmos tipos de dominio.
 
+## Supabase Client direto
+
+O app web usa `@supabase/supabase-js` diretamente no frontend quando as variaveis publicas do Supabase estao configuradas. Prisma permanece no projeto para migrations, validacao de schema e tarefas administrativas; ele nunca deve ser importado no navegador.
+
+Variaveis publicas usadas pelo React/Vite:
+
+- `VITE_SUPABASE_URL`: Project URL do Supabase.
+- `VITE_SUPABASE_ANON_KEY`: anon public key do Supabase.
+
+Variaveis privadas usadas somente por backend/migrations:
+
+- `DATABASE_URL`: URL pooled do Supabase Postgres para runtime backend/serverless quando APIs administrativas forem usadas.
+- `DIRECT_URL`: URL direta do Supabase Postgres para migrations.
+
+Nunca coloque `DATABASE_URL`, `DIRECT_URL` ou service role key no frontend. Variaveis privadas nao podem ter prefixo `VITE_`.
+
+Com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` definidos, a fonte principal passa a ser:
+
+- Supabase Auth para login, cadastro, sessao e logout.
+- `shopping_lists` para listas.
+- `products` para produtos.
+- `price_history` para historico e dashboard.
+
+Sem as variaveis publicas do Supabase, o app conserva o fallback local via `localStorage` e a chave antiga `app-supermarket-db-v2`. Dados locais nao sao apagados automaticamente.
+
+Antes de usar a anon key em producao, aplique as migrations e execute o SQL de RLS em `docs/supabase-direct-client-rls.sql`. As policies garantem que cada usuario autenticado leia e altere apenas seus proprios dados.
+
 ## Supabase Postgres + Prisma - fase 1
 
 Esta fase prepara o backend para uma migracao futura do `localStorage` para Supabase Postgres usando Prisma ORM. O frontend continua funcionando com `localStorage` e a chave `app-supermarket-db-v2`; nenhuma tela foi migrada para banco remoto nesta etapa.
@@ -35,17 +62,20 @@ Arquivos principais:
 - `src/server/services/productService.ts`: regras de negocio, ownership e validacoes da API de produtos.
 - `src/server/repositories/priceHistoryRepository.ts`: operacoes Prisma para historico de precos.
 - `src/server/services/priceHistoryService.ts`: filtros, ownership, normalizacao e criacao de historico.
-- `src/services/listApi.ts`: cliente `fetch` para CRUD remoto de listas.
-- `src/services/productApi.ts`: cliente `fetch` para CRUD remoto de produtos.
-- `src/services/priceHistoryApi.ts`: cliente `fetch` para historico remoto.
+- `src/lib/supabaseClient.ts`: cliente Supabase direto usando anon key publica.
+- `src/services/authService.ts`: login, cadastro, sessao e logout via Supabase Auth.
+- `src/services/listApi.ts`: CRUD direto em `shopping_lists` via Supabase Client.
+- `src/services/productApi.ts`: CRUD direto em `products` via Supabase Client.
+- `src/services/priceHistoryApi.ts`: acesso direto a `price_history` via Supabase Client.
+- `docs/supabase-direct-client-rls.sql`: policies obrigatorias de Row Level Security.
 - `docs/supabase-prisma-setup.md`: configuracao completa e proximos passos.
 
 Variaveis obrigatorias na Vercel:
 
-- `DATABASE_URL`: URL pooled do Supabase Postgres, usada pelo Prisma Client em runtime serverless.
-- `DIRECT_URL`: URL direta do Supabase Postgres, usada para migrations.
-- `VITE_USE_REMOTE_LISTS`: feature flag nao sensivel. Use `false` para manter `localStorage`; use `true` apenas quando a UI de listas for migrada para API.
-- `VITE_USE_REMOTE_PRODUCTS`: feature flag nao sensivel. Use `false` para manter produtos no `localStorage`; use `true` apenas quando o CRUD de produtos for migrado para API.
+- `VITE_SUPABASE_URL`: Project URL publica do Supabase.
+- `VITE_SUPABASE_ANON_KEY`: anon public key do Supabase.
+- `DATABASE_URL`: URL pooled do Supabase Postgres, usada somente por backend/migrations.
+- `DIRECT_URL`: URL direta do Supabase Postgres, usada somente por migrations.
 - `VITE_USE_REMOTE_PRICE_HISTORY`: feature flag nao sensivel. Use `false` para manter historico no `localStorage`; use `true` quando Dashboard/Histórico forem alimentados pela API.
 
 Nao coloque valores reais no codigo. Use `.env.example` apenas como modelo e configure os valores reais em `Vercel > Project Settings > Environment Variables`.
