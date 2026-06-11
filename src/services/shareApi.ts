@@ -1,4 +1,4 @@
-import type { ListShare, SharePermission, ShoppingList, User } from "../types";
+import type { ListShare, SharePermission, ShoppingList, User, UserProfile } from "../types";
 import { requireSupabaseClient } from "../lib/supabaseClient";
 
 export type ShareIdentity = Pick<User, "uid" | "email" | "name">;
@@ -52,6 +52,27 @@ export async function findProfileByEmail(email: string) {
   }
 
   return data as RemoteProfile | null;
+}
+
+export async function getShareableProfiles(identity: ShareIdentity): Promise<UserProfile[]> {
+  const supabase = requireSupabaseClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, email, name")
+    .neq("id", identity.uid)
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw new Error(`Nao foi possivel carregar usuarios: ${error.message}`);
+  }
+
+  return ((data ?? []) as RemoteProfile[])
+    .filter((profile) => Boolean(profile.id) && profile.id !== identity.uid)
+    .map((profile) => ({
+      id: profile.id,
+      email: profile.email ?? "",
+      name: profile.name || profile.email?.split("@")[0] || "Usuario"
+    }));
 }
 
 export async function getListShares(listId: string, identity: ShareIdentity) {

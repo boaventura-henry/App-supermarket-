@@ -293,6 +293,14 @@
     @apply h-12 w-full rounded-2xl border border-supermarket-ink/15 bg-white px-4 text-supermarket-ink outline-none transition placeholder:text-supermarket-ink/45 focus:border-supermarket-leaf focus:ring-4 focus:ring-supermarket-leaf/15;
   }
 
+  .input-shell {
+    @apply flex h-12 items-center gap-2 rounded-2xl border border-supermarket-ink/15 bg-white px-4 text-supermarket-ink/55 transition focus-within:border-supermarket-leaf focus-within:ring-4 focus-within:ring-supermarket-leaf/15;
+  }
+
+  .input-shell input {
+    @apply min-w-0 flex-1 bg-transparent text-supermarket-ink outline-none placeholder:text-supermarket-ink/45;
+  }
+
   .field {
     @apply grid gap-2 text-sm font-bold text-supermarket-ink/70;
   }
@@ -617,7 +625,7 @@
   }
 
   .shared-list-row {
-    @apply flex items-center gap-3 rounded-2xl border border-supermarket-ink/10 bg-white px-4 py-3 shadow-soft;
+    @apply flex flex-col gap-3 rounded-2xl border border-supermarket-ink/10 bg-white px-4 py-3 shadow-soft sm:flex-row sm:items-center sm:justify-between;
   }
 
   .product-row-done {
@@ -704,6 +712,7 @@
   }
 
   .theme-dark .input,
+  .theme-dark .input-shell,
   .theme-dark .compact-select,
   .theme-dark .inline-input,
   .theme-dark .color-input,
@@ -724,6 +733,7 @@
   .theme-dark select:focus,
   .theme-dark textarea:focus,
   .theme-dark .input:focus,
+  .theme-dark .input-shell:focus-within,
   .theme-dark .inline-input:focus,
   .theme-dark .compact-select:focus {
     background: #020806;
@@ -732,6 +742,7 @@
   }
 
   .theme-dark .input::placeholder,
+  .theme-dark .input-shell input::placeholder,
   .theme-dark input::placeholder,
   .theme-dark textarea::placeholder {
     color: rgba(233, 255, 243, 0.48);

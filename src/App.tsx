@@ -35,7 +35,7 @@ import {
   saveDatabase,
   sortByNewest
 } from "./storage";
-import type { AppDatabase, ListShare, PriceHistory, Product, SharePermission, ShoppingList, User, View } from "./types";
+import type { AppDatabase, ListShare, PriceHistory, Product, SharePermission, ShoppingList, User, UserProfile, View } from "./types";
 import {
   createPasskeyForUser,
   describePasskeyError,
@@ -66,6 +66,7 @@ import {
 import {
   findProfileByEmail,
   getListShares,
+  getShareableProfiles,
   removeListShare,
   shareListWithUser,
   updateListSharePermission
@@ -260,6 +261,8 @@ export function App() {
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [listShares, setListShares] = useState<ListShare[]>([]);
+  const [shareProfiles, setShareProfiles] = useState<UserProfile[]>([]);
+  const [sharingDebug, setSharingDebug] = useState({ selectedList: "", userCount: 0, shareCount: 0 });
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -413,6 +416,33 @@ export function App() {
       isMounted = false;
     };
   }, [currentUser, userData.lists]);
+
+  useEffect(() => {
+    if (!currentUser || view !== "sharing") {
+      return;
+    }
+
+    let isMounted = true;
+    setLastSupabaseOperation("select");
+    setLastSupabaseTable("profiles");
+    getShareableProfiles(currentUser)
+      .then((profiles) => {
+        if (!isMounted) {
+          return;
+        }
+        setShareProfiles(profiles);
+        setSharingDebug((current) => ({ ...current, userCount: profiles.length }));
+        setLastSupabaseError("");
+      })
+      .catch((error) => {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel carregar usuarios."));
+        console.error("Nao foi possivel carregar usuarios para compartilhamento.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser, view]);
 
   useEffect(() => {
     if (!USE_REMOTE_PRODUCTS || !currentUser || !selectedListId) {
@@ -900,6 +930,25 @@ export function App() {
       const exists = current.some((item) => item.id === share.id);
       return exists ? current.map((item) => (item.id === share.id ? share : item)) : [...current, share];
     });
+    setLastSupabaseError("");
+  }
+
+  async function shareShoppingListWithProfile(listId: string, profileId: string, permission: SharePermission) {
+    if (!currentUser) {
+      return;
+    }
+    const ownedList = userData.lists.find((list) => list.id === listId && list.userId === currentUser.uid);
+    if (!ownedList) {
+      throw new Error("Somente o criador pode compartilhar esta lista.");
+    }
+    setLastSupabaseOperation("upsert");
+    setLastSupabaseTable("list_shares");
+    const share = await shareListWithUser(listId, currentUser, profileId, permission);
+    setListShares((current) => {
+      const exists = current.some((item) => item.id === share.id);
+      return exists ? current.map((item) => (item.id === share.id ? share : item)) : [...current, share];
+    });
+    setLastSupabaseError("");
   }
 
   async function updateShoppingListShare(shareId: string, permission: SharePermission) {
@@ -910,6 +959,7 @@ export function App() {
     setLastSupabaseTable("list_shares");
     const share = await updateListSharePermission(shareId, currentUser, permission);
     setListShares((current) => current.map((item) => (item.id === share.id ? share : item)));
+    setLastSupabaseError("");
   }
 
   async function deleteShoppingListShare(shareId: string) {
@@ -920,6 +970,7 @@ export function App() {
     setLastSupabaseTable("list_shares");
     await removeListShare(shareId, currentUser);
     setListShares((current) => current.filter((share) => share.id !== shareId));
+    setLastSupabaseError("");
   }
 
   async function saveProduct(listId: string, form: ProductForm) {
@@ -1401,6 +1452,20 @@ export function App() {
         />
       ) : null}
 
+      {view === "sharing" ? (
+        <ShareListsScreen
+          lists={userData.lists.filter((list) => list.userId === currentUser.uid && !list.sharedPermission)}
+          products={userData.products}
+          profiles={shareProfiles}
+          shares={listShares}
+          currentUserId={currentUser.uid}
+          onShareUser={shareShoppingListWithProfile}
+          onUpdateShare={updateShoppingListShare}
+          onRemoveShare={deleteShoppingListShare}
+          onDebugChange={setSharingDebug}
+        />
+      ) : null}
+
       {view === "dashboard" ? <Dashboard products={userData.products} priceHistory={userData.priceHistory} /> : null}
 
       {view === "history" ? <HistoryView priceHistory={userData.priceHistory} /> : null}
@@ -1414,6 +1479,7 @@ export function App() {
         currentView={view}
         lastSupabaseOperation={lastSupabaseOperation}
         lastSupabaseTable={lastSupabaseTable}
+        sharingDebug={view === "sharing" ? sharingDebug : null}
       />
     </main>
   );
@@ -1428,7 +1494,8 @@ function SupabaseDebugPanel({
   lastAuthError,
   currentView,
   lastSupabaseOperation,
-  lastSupabaseTable
+  lastSupabaseTable,
+  sharingDebug
 }: {
   enabled: boolean;
   currentUser: User | null;
@@ -1439,6 +1506,7 @@ function SupabaseDebugPanel({
   currentView: string;
   lastSupabaseOperation: string;
   lastSupabaseTable: string;
+  sharingDebug?: { selectedList: string; userCount: number; shareCount: number } | null;
 }) {
   if (!enabled) {
     return null;
@@ -1460,6 +1528,13 @@ function SupabaseDebugPanel({
         Ultima operacao Supabase: {lastSupabaseOperation || "nenhuma"}
         {lastSupabaseTable ? ` em ${lastSupabaseTable}` : ""}
       </p>
+      {sharingDebug ? (
+        <>
+          <p>Lista selecionada: {sharingDebug.selectedList || "nenhuma"}</p>
+          <p>Usuarios carregados: {sharingDebug.userCount}</p>
+          <p>Compartilhamentos carregados: {sharingDebug.shareCount}</p>
+        </>
+      ) : null}
       <p className={lastAuthError ? "text-red-200" : "text-supermarket-mint"}>
         Ultimo erro Auth: {lastAuthError || "nenhum"}
       </p>
@@ -2008,6 +2083,11 @@ function ShoppingList({
                       <small>
                         {creatorLabel(list.userId, list)}
                       </small>
+                      {list.sharedPermission ? (
+                        <small>
+                          Permissao: {list.sharedPermission === "editor" ? "Editor" : "Visualizador"}
+                        </small>
+                      ) : null}
                       <small>
                         {summary.count} {summary.count === 1 ? "item" : "itens"} - {summary.bought} comprados - {money(summary.total)}
                       </small>
@@ -2850,6 +2930,250 @@ function SharedListsContent(props: {
   );
 }
 
+function ShareListsScreen({
+  lists,
+  products,
+  profiles,
+  shares,
+  currentUserId,
+  onShareUser,
+  onUpdateShare,
+  onRemoveShare,
+  onDebugChange
+}: {
+  lists: ShoppingList[];
+  products: Product[];
+  profiles: UserProfile[];
+  shares: ListShare[];
+  currentUserId: string;
+  onShareUser: (listId: string, profileId: string, permission: SharePermission) => void | Promise<void>;
+  onUpdateShare: (shareId: string, permission: SharePermission) => void | Promise<void>;
+  onRemoveShare: (shareId: string) => void | Promise<void>;
+  onDebugChange: (debug: { selectedList: string; userCount: number; shareCount: number }) => void;
+}) {
+  const [selectedListId, setSelectedListId] = useState("");
+  const [query, setQuery] = useState("");
+  const [draftPermissions, setDraftPermissions] = useState<Record<string, SharePermission>>({});
+  const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const selectedList = lists.find((list) => list.id === selectedListId) ?? null;
+  const selectedShares = useMemo(
+    () => shares.filter((share) => share.listId === selectedListId),
+    [selectedListId, shares]
+  );
+  const shareByUser = useMemo(() => new Map(selectedShares.map((share) => [share.sharedUserId, share])), [selectedShares]);
+  const visibleProfiles = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return profiles
+      .filter((profile) => profile.id !== currentUserId)
+      .filter((profile) => {
+        if (!normalized) {
+          return true;
+        }
+        return `${profile.name} ${profile.email}`.toLowerCase().includes(normalized);
+      });
+  }, [currentUserId, profiles, query]);
+
+  useEffect(() => {
+    if (lists.length === 0) {
+      setSelectedListId("");
+      return;
+    }
+    if (!selectedListId || !lists.some((list) => list.id === selectedListId)) {
+      setSelectedListId(lists[0].id);
+    }
+  }, [lists, selectedListId]);
+
+  useEffect(() => {
+    onDebugChange({
+      selectedList: selectedList?.name ?? "",
+      userCount: profiles.length,
+      shareCount: selectedShares.length
+    });
+  }, [onDebugChange, profiles.length, selectedList?.name, selectedShares.length]);
+
+  const selectedSummary = selectedList
+    ? {
+        items: products.filter((product) => product.listId === selectedList.id).length,
+        shared: selectedShares.length
+      }
+    : { items: 0, shared: 0 };
+
+  function getPermission(profileId: string): SharePermission {
+    return shareByUser.get(profileId)?.permission ?? draftPermissions[profileId] ?? "viewer";
+  }
+
+  async function toggleShare(profile: UserProfile, checked: boolean) {
+    if (!selectedList) {
+      return;
+    }
+    setError("");
+    setMessage("");
+    setBusyProfileId(profile.id);
+    try {
+      const existing = shareByUser.get(profile.id);
+      if (checked) {
+        await onShareUser(selectedList.id, profile.id, getPermission(profile.id));
+        setMessage(`Compartilhamento criado para ${profile.name}.`);
+      } else if (existing) {
+        await onRemoveShare(existing.id);
+        setMessage(`Compartilhamento removido de ${profile.name}.`);
+      }
+    } catch (err) {
+      setError(getErrorMessage(err, "Nao foi possivel atualizar o compartilhamento."));
+    } finally {
+      setBusyProfileId(null);
+    }
+  }
+
+  async function changePermission(profile: UserProfile, permission: SharePermission) {
+    setDraftPermissions((current) => ({ ...current, [profile.id]: permission }));
+    const existing = shareByUser.get(profile.id);
+    if (!existing) {
+      return;
+    }
+    setError("");
+    setMessage("");
+    setBusyProfileId(profile.id);
+    try {
+      await onUpdateShare(existing.id, permission);
+      setMessage(`Permissao atualizada para ${profile.name}.`);
+    } catch (err) {
+      setError(getErrorMessage(err, "Nao foi possivel atualizar a permissao."));
+    } finally {
+      setBusyProfileId(null);
+    }
+  }
+
+  return (
+    <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-sm font-black uppercase text-supermarket-leaf">Supabase</p>
+          <h2 className="text-2xl font-black">Compartilhamentos</h2>
+          <p className="text-supermarket-ink/60">
+            Escolha uma lista sua e marque os usuarios que podem visualizar ou editar os produtos.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-supermarket-ink/10 bg-white px-4 py-3 text-sm font-bold text-supermarket-ink/70 shadow-soft">
+          {selectedSummary.shared} compartilhamentos ativos
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(260px,360px)_1fr]">
+        <aside className="panel h-fit">
+          <label className="field">
+            <span>Lista selecionada</span>
+            <select
+              className="input"
+              value={selectedListId}
+              onChange={(event) => {
+                setSelectedListId(event.target.value);
+                setMessage("");
+                setError("");
+              }}
+              disabled={lists.length === 0}
+            >
+              {lists.length === 0 ? <option value="">Nenhuma lista propria</option> : null}
+              {lists.map((list) => (
+                <option key={list.id} value={list.id}>
+                  {list.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {selectedList ? (
+            <div className="mt-4 rounded-2xl border border-supermarket-ink/10 p-4">
+              <span className="list-color-dot mb-3" style={{ backgroundColor: selectedList.color }} />
+              <strong className="block text-lg">{selectedList.name}</strong>
+              <p className="mt-1 text-sm font-semibold text-supermarket-ink/60">
+                {selectedSummary.items} {selectedSummary.items === 1 ? "item" : "itens"} - {selectedSummary.shared} usuarios com acesso
+              </p>
+            </div>
+          ) : (
+            <p className="mt-4 rounded-2xl bg-supermarket-mint/60 p-4 text-sm font-bold text-supermarket-ink/70">
+              Crie uma lista propria antes de configurar compartilhamentos.
+            </p>
+          )}
+        </aside>
+
+        <section className="panel">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-xl font-black">Usuarios cadastrados</h3>
+              <p className="text-sm font-semibold text-supermarket-ink/60">
+                Fonte: tabela profiles. O seu proprio usuario fica oculto.
+              </p>
+            </div>
+            <label className="input-shell min-w-0 sm:w-72">
+              <Search size={17} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Buscar usuario"
+                aria-label="Buscar usuario"
+              />
+            </label>
+          </div>
+
+          {message ? <p className="mb-4 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</p> : null}
+          {error ? <p className="mb-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+
+          <div className="grid gap-2">
+            {visibleProfiles.length === 0 ? (
+              <EmptyState action={profiles.length === 0 ? "Nenhum usuario em profiles" : "Nenhum usuario encontrado"} />
+            ) : (
+              visibleProfiles.map((profile) => {
+                const share = shareByUser.get(profile.id);
+                const isShared = Boolean(share);
+                const isBusy = busyProfileId === profile.id;
+                return (
+                  <article className="shared-list-row" key={profile.id}>
+                    <label className="flex min-w-0 flex-1 items-center gap-3">
+                      <input
+                        className="h-5 w-5 accent-supermarket-leaf"
+                        type="checkbox"
+                        checked={isShared}
+                        disabled={!selectedList || isBusy}
+                        onChange={(event) => {
+                          void toggleShare(profile, event.target.checked);
+                        }}
+                      />
+                      <span className="min-w-0">
+                        <strong className="block truncate">{profile.name}</strong>
+                        <small className="block truncate">{profile.email || "E-mail nao informado"}</small>
+                      </span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="input min-w-[135px]"
+                        value={getPermission(profile.id)}
+                        disabled={!selectedList || isBusy}
+                        onChange={(event) => {
+                          void changePermission(profile, event.target.value as SharePermission);
+                        }}
+                      >
+                        <option value="viewer">Visualizador</option>
+                        <option value="editor">Editor</option>
+                      </select>
+                      <span className="min-w-[76px] text-right text-xs font-black uppercase text-supermarket-ink/50">
+                        {isBusy ? "Salvando" : isShared ? "Ativo" : "Sem acesso"}
+                      </span>
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function Dashboard({ products, priceHistory }: { products: Product[]; priceHistory: PriceHistory[] }) {
   const productNames = useMemo(
     () => Array.from(new Set(priceHistory.map((item) => item.productName))).sort(),
@@ -3173,6 +3497,9 @@ function SideMenu({
           </NavButton>
           <NavButton active={currentView === "shared"} onClick={() => onNavigate("shared")}>
             Outras listas
+          </NavButton>
+          <NavButton active={currentView === "sharing"} onClick={() => onNavigate("sharing")}>
+            Compartilhamentos
           </NavButton>
           <NavButton active={currentView === "dashboard"} onClick={() => onNavigate("dashboard")}>
             Dashboard

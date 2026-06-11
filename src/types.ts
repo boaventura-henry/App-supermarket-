@@ -58,6 +58,12 @@ export type ListShare = {
   updatedAt: number;
 };
 
+export type UserProfile = {
+  id: string;
+  name: string;
+  email: string;
+};
+
 export type PriceHistory = {
   id: string;
   userId: string;
@@ -80,4 +86,4 @@ export type AppDatabase = {
   activeUserId: string | null;
 };
 
-export type View = "home" | "list" | "shared" | "dashboard" | "history";
+export type View = "home" | "list" | "shared" | "sharing" | "dashboard" | "history";

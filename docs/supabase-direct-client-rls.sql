@@ -224,6 +224,8 @@ on public.list_shares for insert
 to authenticated
 with check (
   owner_user_id = auth.uid()
+  and shared_user_id <> auth.uid()
+  and permission in ('viewer', 'editor')
   and exists (
     select 1
     from public.shopping_lists
@@ -236,7 +238,11 @@ create policy "list_shares_update_owner"
 on public.list_shares for update
 to authenticated
 using (owner_user_id = auth.uid())
-with check (owner_user_id = auth.uid());
+with check (
+  owner_user_id = auth.uid()
+  and shared_user_id <> auth.uid()
+  and permission in ('viewer', 'editor')
+);
 
 create policy "list_shares_delete_owner"
 on public.list_shares for delete

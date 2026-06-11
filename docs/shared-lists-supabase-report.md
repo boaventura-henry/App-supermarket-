@@ -112,6 +112,29 @@ Permite:
 - alterar permissao existente;
 - remover compartilhamento.
 
+## Tela Compartilhamentos
+
+Foi adicionada uma opcao dedicada no menu lateral:
+
+```text
+Compartilhamentos
+```
+
+Permite:
+
+- selecionar uma lista propria;
+- listar usuarios cadastrados em `profiles`;
+- marcar/desmarcar usuarios com acesso;
+- definir permissao `viewer` ou `editor`;
+- gravar/remover registros em `list_shares`;
+- acompanhar diagnostico quando `VITE_DEBUG_SUPABASE=true`.
+
+Relatorio especifico:
+
+```text
+docs/shared-list-management-screen-report.md
+```
+
 ## Outras Listas
 
 Antes:
