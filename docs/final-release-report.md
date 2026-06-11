@@ -375,6 +375,36 @@ npm exec -- prisma validate
 
 6. Se tudo passar, fazer merge da branch na `main` e executar push.
 
+## Gate Final De Publicacao
+
+Executado em 2026-06-10 na branch:
+
+```text
+feature/remote-shared-lists-supabase
+```
+
+Resultados:
+
+- `npm exec -- prisma migrate status`: aprovado, `Database schema is up to date!`
+- `npm run lint`: aprovado
+- `npm run build`: aprovado
+- `npm exec -- prisma validate`: aprovado
+
+Confirmacoes:
+
+- Nenhuma migration pendente.
+- Nenhum erro de build.
+- Nenhum erro de lint.
+- Prisma schema validado.
+- RLS documentado em `docs/supabase-direct-client-rls.sql`.
+- RLS aplicado/validado no Supabase para as tabelas de negocio.
+- `.env` e `.vercel` permanecem ignorados pelo Git.
+- Nenhum secret, token, URL real de banco ou service role key foi versionado.
+
+Status de release:
+
+- Branch liberada para Pull Request e merge na `main`.
+
 ## Resultado Final
 
 Merge realizado: nao.
