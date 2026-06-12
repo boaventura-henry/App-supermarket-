@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import {
   ArrowUpDown,
   BarChart3,
+  Camera,
   CheckCircle2,
   Circle,
   Edit3,
@@ -9,6 +10,8 @@ import {
   EyeOff,
   Fingerprint,
   History,
+  ImagePlus,
+  KeyRound,
   LogOut,
   Lock,
   Mail,
@@ -25,6 +28,7 @@ import {
   Sun,
   Trash2,
   X,
+  UserCircle,
   UserPlus
 } from "lucide-react";
 import {
@@ -84,6 +88,12 @@ import {
   signUp,
   toLocalUser
 } from "./services/authService";
+import {
+  changePassword as changeRemotePassword,
+  getProfile as getRemoteProfile,
+  updateProfile as updateRemoteProfile,
+  uploadProfilePhoto
+} from "./services/profileApi";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
@@ -113,6 +123,16 @@ type ListForm = {
 type ShareForm = {
   email: string;
   permission: SharePermission;
+};
+
+type ProfileForm = {
+  name: string;
+};
+
+type PasswordForm = {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
 };
 
 type ProductSortField = "original" | "name" | "quantity";
@@ -360,6 +380,35 @@ export function App() {
   const userListIds = useMemo(() => userData.lists.map((list) => list.id).sort().join("|"), [userData.lists]);
 
   useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
+    let isMounted = true;
+    setLastSupabaseOperation("select");
+    setLastSupabaseTable("profiles");
+    getRemoteProfile(currentUser)
+      .then((profile) => {
+        if (!isMounted) {
+          return;
+        }
+        const nextUser = profileToUser(currentUser, profile);
+        if (!hasSameProfileDisplay(currentUser, nextUser)) {
+          updateDatabase((current) => mergeAuthenticatedUser(current, nextUser));
+        }
+        setLastSupabaseError("");
+      })
+      .catch((error) => {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel carregar perfil remoto."));
+        console.error("Nao foi possivel carregar perfil remoto.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
+
+  useEffect(() => {
     const listIds = userListIds ? userListIds.split("|") : [];
     if (!USE_REMOTE_PRODUCTS || !currentUser || listIds.length === 0) {
       return;
@@ -541,6 +590,25 @@ export function App() {
 
   function updateDatabase(updater: (database: AppDatabase) => AppDatabase) {
     setDatabase((current) => updater(current));
+  }
+
+  function profileToUser(user: User, profile: UserProfile): User {
+    return {
+      ...user,
+      name: profile.name,
+      email: profile.email || user.email,
+      avatarUrl: profile.avatarUrl,
+      avatarPath: profile.avatarPath
+    };
+  }
+
+  function hasSameProfileDisplay(left: User, right: User) {
+    return (
+      left.name === right.name &&
+      left.email === right.email &&
+      left.avatarUrl === right.avatarUrl &&
+      left.avatarPath === right.avatarPath
+    );
   }
 
   function mergeAuthenticatedUser(current: AppDatabase, user: User): AppDatabase {
@@ -973,6 +1041,41 @@ export function App() {
     setLastSupabaseError("");
   }
 
+  async function saveUserProfile(form: ProfileForm) {
+    if (!currentUser) {
+      return;
+    }
+    setLastSupabaseOperation("update");
+    setLastSupabaseTable("profiles");
+    const profile = await updateRemoteProfile(currentUser, { name: form.name });
+    updateDatabase((current) => mergeAuthenticatedUser(current, profileToUser(currentUser, profile)));
+    setLastSupabaseError("");
+  }
+
+  async function saveUserAvatar(file: File) {
+    if (!currentUser) {
+      return;
+    }
+    setLastSupabaseOperation("upload");
+    setLastSupabaseTable("profile-photos");
+    const profile = await uploadProfilePhoto(currentUser, file);
+    updateDatabase((current) => mergeAuthenticatedUser(current, profileToUser(currentUser, profile)));
+    setLastSupabaseError("");
+  }
+
+  async function saveUserPassword(form: PasswordForm) {
+    if (!currentUser) {
+      return;
+    }
+    if (form.newPassword !== form.confirmPassword) {
+      throw new Error("A nova senha e a confirmacao nao conferem.");
+    }
+    setLastSupabaseOperation("update");
+    setLastSupabaseTable("auth.users");
+    await changeRemotePassword(currentUser, form.currentPassword, form.newPassword);
+    setLastSupabaseError("");
+  }
+
   async function saveProduct(listId: string, form: ProductForm) {
     if (!currentUser) {
       return;
@@ -1366,15 +1469,6 @@ export function App() {
     <main className={`${themeClass} min-h-screen bg-supermarket-paper text-supermarket-ink`}>
       <header className="sticky top-0 z-20 border-b border-supermarket-ink/10 bg-white/95 backdrop-blur">
         <div className="app-header-inner">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="app-header-logo">
-              <ShoppingBasket size={21} />
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-xs font-bold text-supermarket-ink/60">{currentUser.name}</p>
-              <h1 className="truncate text-lg font-black sm:text-xl">App Supermarket</h1>
-            </div>
-          </div>
           <button
             className="menu-trigger"
             type="button"
@@ -1385,6 +1479,19 @@ export function App() {
           >
             <Menu size={21} />
             <span>Menu</span>
+          </button>
+          <div className="app-header-title">
+            <ShoppingBasket size={19} />
+            <h1>SuperList</h1>
+          </div>
+          <button
+            className="profile-avatar-button"
+            type="button"
+            onClick={() => navigateTo("profile")}
+            aria-label="Abrir perfil"
+            title={currentUser.name}
+          >
+            <ProfileAvatar user={currentUser} size="md" />
           </button>
         </div>
       </header>
@@ -1398,6 +1505,7 @@ export function App() {
         onToggleTheme={toggleTheme}
         theme={theme}
         userName={currentUser.name}
+        user={currentUser}
       />
 
       {view === "home" ? <Home products={userData.products} /> : null}
@@ -1469,6 +1577,15 @@ export function App() {
       {view === "dashboard" ? <Dashboard products={userData.products} priceHistory={userData.priceHistory} /> : null}
 
       {view === "history" ? <HistoryView priceHistory={userData.priceHistory} /> : null}
+
+      {view === "profile" ? (
+        <ProfileScreen
+          user={currentUser}
+          onSaveProfile={saveUserProfile}
+          onSaveAvatar={saveUserAvatar}
+          onChangePassword={saveUserPassword}
+        />
+      ) : null}
       <SupabaseDebugPanel
         enabled={showSupabaseDebug}
         currentUser={currentUser}
@@ -1482,6 +1599,263 @@ export function App() {
         sharingDebug={view === "sharing" ? sharingDebug : null}
       />
     </main>
+  );
+}
+
+function ProfileAvatar({
+  user,
+  avatarUrl,
+  label = "sem foto",
+  size = "md"
+}: {
+  user?: Pick<User, "name" | "email" | "avatarUrl"> | null;
+  avatarUrl?: string;
+  label?: string;
+  size?: "sm" | "md" | "lg";
+}) {
+  const source = avatarUrl ?? user?.avatarUrl;
+  const initials = getInitials(user?.name || user?.email || "");
+  const className = `profile-avatar profile-avatar-${size}`;
+
+  if (source) {
+    return <img className={className} src={source} alt={user?.name ? `Foto de ${user.name}` : "Foto de perfil"} />;
+  }
+
+  return (
+    <span className={`${className} profile-avatar-empty`} title={label}>
+      {initials || <UserCircle size={size === "lg" ? 34 : 20} />}
+    </span>
+  );
+}
+
+function getInitials(value: string) {
+  const parts = value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) {
+    return "";
+  }
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
+function ProfileScreen({
+  user,
+  onSaveProfile,
+  onSaveAvatar,
+  onChangePassword
+}: {
+  user: User;
+  onSaveProfile: (form: ProfileForm) => void | Promise<void>;
+  onSaveAvatar: (file: File) => void | Promise<void>;
+  onChangePassword: (form: PasswordForm) => void | Promise<void>;
+}) {
+  const [profileForm, setProfileForm] = useState<ProfileForm>({ name: user.name });
+  const [passwordForm, setPasswordForm] = useState<PasswordForm>({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: ""
+  });
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  useEffect(() => {
+    setProfileForm({ name: user.name });
+  }, [user.name]);
+
+  useEffect(() => {
+    if (!avatarFile) {
+      setAvatarPreview("");
+      return;
+    }
+    const objectUrl = URL.createObjectURL(avatarFile);
+    setAvatarPreview(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [avatarFile]);
+
+  async function submitProfile(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    setIsSavingProfile(true);
+    try {
+      await onSaveProfile(profileForm);
+      setMessage("Perfil atualizado com sucesso.");
+    } catch (err) {
+      setError(getErrorMessage(err, "Nao foi possivel salvar o perfil."));
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }
+
+  async function submitAvatar(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (!avatarFile) {
+      setError("Escolha uma foto antes de salvar.");
+      return;
+    }
+    setIsSavingAvatar(true);
+    try {
+      await onSaveAvatar(avatarFile);
+      setAvatarFile(null);
+      setMessage("Foto de perfil atualizada.");
+    } catch (err) {
+      setError(getErrorMessage(err, "Nao foi possivel atualizar a foto."));
+    } finally {
+      setIsSavingAvatar(false);
+    }
+  }
+
+  async function submitPassword(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    setIsChangingPassword(true);
+    try {
+      await onChangePassword(passwordForm);
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setMessage("Senha alterada com sucesso.");
+    } catch (err) {
+      setError(getErrorMessage(err, "Nao foi possivel alterar a senha."));
+    } finally {
+      setIsChangingPassword(false);
+    }
+  }
+
+  return (
+    <section className="mx-auto grid max-w-5xl gap-5 px-4 py-6 sm:px-6 lg:px-8">
+      <div>
+        <p className="text-sm font-black uppercase text-supermarket-leaf">Conta</p>
+        <h2 className="text-2xl font-black">Perfil</h2>
+        <p className="text-supermarket-ink/60">Atualize seus dados, foto e senha usando Supabase Auth.</p>
+      </div>
+
+      {message ? <p className="rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">{message}</p> : null}
+      {error ? <p className="rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+
+      <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+        <form className="panel grid gap-4" onSubmit={submitProfile}>
+          <div className="flex items-center gap-4">
+            <ProfileAvatar user={user} size="lg" />
+            <div>
+              <h3 className="text-xl font-black">Dados do usuario</h3>
+              <p className="text-sm font-semibold text-supermarket-ink/60">E-mail exibido como somente leitura.</p>
+            </div>
+          </div>
+          <label className="field">
+            <span>Nome</span>
+            <input
+              className="input"
+              value={profileForm.name}
+              onChange={(event) => setProfileForm({ name: event.target.value })}
+              placeholder="Seu nome"
+            />
+          </label>
+          <label className="field">
+            <span>E-mail</span>
+            <input className="input" value={user.email} readOnly aria-readonly="true" />
+          </label>
+          <button className="button-primary justify-center" type="submit" disabled={isSavingProfile}>
+            <Save size={18} />
+            {isSavingProfile ? "Salvando..." : "Salvar perfil"}
+          </button>
+        </form>
+
+        <form className="panel grid gap-4" onSubmit={submitAvatar}>
+          <div className="flex items-center gap-4">
+            <div className="profile-photo-preview">
+              <ProfileAvatar user={user} avatarUrl={avatarPreview || user.avatarUrl} size="lg" />
+            </div>
+            <div>
+              <h3 className="text-xl font-black">Foto de perfil</h3>
+              <p className="text-sm font-semibold text-supermarket-ink/60">JPG, PNG ou WEBP ate 5 MB.</p>
+            </div>
+          </div>
+          <label className="field">
+            <span>Galeria ou camera</span>
+            <input
+              className="input file:mr-3 file:rounded-xl file:border-0 file:bg-supermarket-leaf file:px-3 file:py-2 file:text-sm file:font-bold file:text-white"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(event) => {
+                setError("");
+                setMessage("");
+                setAvatarFile(event.target.files?.[0] ?? null);
+              }}
+            />
+          </label>
+          <div className="flex flex-wrap gap-3">
+            <button className="button-primary justify-center" type="submit" disabled={isSavingAvatar || !avatarFile}>
+              <ImagePlus size={18} />
+              {isSavingAvatar ? "Enviando..." : "Salvar foto"}
+            </button>
+            <span className="inline-flex items-center gap-2 text-sm font-bold text-supermarket-ink/60">
+              <Camera size={16} />
+              Galeria ou camera do dispositivo
+            </span>
+          </div>
+        </form>
+      </div>
+
+      <form className="panel grid gap-4" onSubmit={submitPassword}>
+        <div>
+          <h3 className="flex items-center gap-2 text-xl font-black">
+            <KeyRound size={20} />
+            Alterar senha
+          </h3>
+          <p className="text-sm font-semibold text-supermarket-ink/60">
+            Informe a senha atual para reautenticar antes de atualizar.
+          </p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="field">
+            <span>Senha atual</span>
+            <input
+              className="input"
+              type="password"
+              value={passwordForm.currentPassword}
+              onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })}
+              autoComplete="current-password"
+            />
+          </label>
+          <label className="field">
+            <span>Nova senha</span>
+            <input
+              className="input"
+              type="password"
+              value={passwordForm.newPassword}
+              onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })}
+              autoComplete="new-password"
+            />
+          </label>
+          <label className="field">
+            <span>Confirmar nova senha</span>
+            <input
+              className="input"
+              type="password"
+              value={passwordForm.confirmPassword}
+              onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })}
+              autoComplete="new-password"
+            />
+          </label>
+        </div>
+        <button className="button-secondary justify-center" type="submit" disabled={isChangingPassword}>
+          <ShieldCheck size={18} />
+          {isChangingPassword ? "Alterando..." : "Alterar senha"}
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -2077,7 +2451,17 @@ function ShoppingList({
               return (
                 <article className="shopping-list-card" key={list.id}>
                   <button className="shopping-list-card-main" type="button" onClick={() => onSelectList(list.id)}>
-                    <span className="list-color-dot" style={{ backgroundColor: list.color }} />
+                    {list.sharedPermission ? (
+                      <span className="grid shrink-0 justify-items-center gap-1">
+                        <ProfileAvatar
+                          user={{ name: list.ownerName ?? "Dono da lista", email: list.ownerEmail ?? "", avatarUrl: list.ownerAvatarUrl }}
+                          size="sm"
+                        />
+                        {!list.ownerAvatarUrl ? <small className="text-[10px] leading-none">sem foto</small> : null}
+                      </span>
+                    ) : (
+                      <span className="list-color-dot" style={{ backgroundColor: list.color }} />
+                    )}
                     <span className="min-w-0">
                       <strong>{list.name}</strong>
                       <small>
@@ -3454,7 +3838,8 @@ function SideMenu({
   onLogout,
   onToggleTheme,
   theme,
-  userName
+  userName,
+  user
 }: {
   currentView: View;
   isOpen: boolean;
@@ -3464,6 +3849,7 @@ function SideMenu({
   onToggleTheme: () => void;
   theme: ThemeMode;
   userName: string;
+  user: User;
 }) {
   return (
     <>
@@ -3479,9 +3865,12 @@ function SideMenu({
         aria-hidden={!isOpen}
       >
         <div className="side-menu-header">
-          <div>
+          <div className="flex min-w-0 items-center gap-3">
+            <ProfileAvatar user={user} size="sm" />
+            <div className="min-w-0">
             <p>Menu</p>
             <h2>{userName}</h2>
+            </div>
           </div>
           <button className="side-menu-close" type="button" onClick={onClose} aria-label="Fechar menu">
             <X size={22} />
@@ -3500,6 +3889,9 @@ function SideMenu({
           </NavButton>
           <NavButton active={currentView === "sharing"} onClick={() => onNavigate("sharing")}>
             Compartilhar listas
+          </NavButton>
+          <NavButton active={currentView === "profile"} onClick={() => onNavigate("profile")}>
+            Perfil
           </NavButton>
           <NavButton active={currentView === "dashboard"} onClick={() => onNavigate("dashboard")}>
             Dashboard

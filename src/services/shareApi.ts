@@ -7,6 +7,8 @@ type RemoteProfile = {
   id: string;
   email: string;
   name: string;
+  avatar_url?: string | null;
+  avatar_path?: string | null;
 };
 
 type RemoteShare = {
@@ -37,7 +39,13 @@ type RemoteShare = {
 };
 
 const shareSelect =
+  "id, list_id, owner_user_id, shared_user_id, permission, created_at, updated_at, shared_user:profiles!list_shares_shared_user_id_fkey(id, email, name, avatar_url, avatar_path)";
+const fallbackShareSelect =
   "id, list_id, owner_user_id, shared_user_id, permission, created_at, updated_at, shared_user:profiles!list_shares_shared_user_id_fkey(id, email, name)";
+const sharedListsSelect =
+  "id, list_id, owner_user_id, shared_user_id, permission, created_at, updated_at, owner:profiles!list_shares_owner_user_id_fkey(id, email, name, avatar_url, avatar_path), list:shopping_lists(id, user_id, name, color, created_at, updated_at)";
+const fallbackSharedListsSelect =
+  "id, list_id, owner_user_id, shared_user_id, permission, created_at, updated_at, owner:profiles!list_shares_owner_user_id_fkey(id, email, name), list:shopping_lists(id, user_id, name, color, created_at, updated_at)";
 
 export async function findProfileByEmail(email: string) {
   const supabase = requireSupabaseClient();
@@ -58,20 +66,40 @@ export async function getShareableProfiles(identity: ShareIdentity): Promise<Use
   const supabase = requireSupabaseClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, name")
+    .select("id, email, name, avatar_url, avatar_path")
     .neq("id", identity.uid)
     .order("name", { ascending: true });
+
+  if (error && isMissingAvatarColumn(error.message)) {
+    const fallback = await supabase
+      .from("profiles")
+      .select("id, email, name")
+      .neq("id", identity.uid)
+      .order("name", { ascending: true });
+
+    if (fallback.error) {
+      throw new Error(`Nao foi possivel carregar usuarios: ${fallback.error.message}`);
+    }
+
+    return mapProfiles((fallback.data ?? []) as RemoteProfile[], identity.uid);
+  }
 
   if (error) {
     throw new Error(`Nao foi possivel carregar usuarios: ${error.message}`);
   }
 
-  return ((data ?? []) as RemoteProfile[])
-    .filter((profile) => Boolean(profile.id) && profile.id !== identity.uid)
+  return mapProfiles((data ?? []) as RemoteProfile[], identity.uid);
+}
+
+function mapProfiles(profiles: RemoteProfile[], currentUserId: string): UserProfile[] {
+  return profiles
+    .filter((profile) => Boolean(profile.id) && profile.id !== currentUserId)
     .map((profile) => ({
       id: profile.id,
       email: profile.email ?? "",
-      name: profile.name || profile.email?.split("@")[0] || "Usuario"
+      name: profile.name || profile.email?.split("@")[0] || "Usuario",
+      avatarUrl: profile.avatar_url ?? undefined,
+      avatarPath: profile.avatar_path ?? undefined
     }));
 }
 
@@ -83,6 +111,21 @@ export async function getListShares(listId: string, identity: ShareIdentity) {
     .eq("list_id", listId)
     .eq("owner_user_id", identity.uid)
     .order("created_at", { ascending: true });
+
+  if (error && isMissingAvatarColumn(error.message)) {
+    const fallback = await supabase
+      .from("list_shares")
+      .select(fallbackShareSelect)
+      .eq("list_id", listId)
+      .eq("owner_user_id", identity.uid)
+      .order("created_at", { ascending: true });
+
+    if (fallback.error) {
+      throw new Error(`Nao foi possivel carregar compartilhamentos: ${fallback.error.message}`);
+    }
+
+    return ((fallback.data ?? []) as RemoteShare[]).map(toLocalShare);
+  }
 
   if (error) {
     throw new Error(`Nao foi possivel carregar compartilhamentos: ${error.message}`);
@@ -115,7 +158,7 @@ export async function shareListWithUser(
       },
       { onConflict: "list_id,shared_user_id" }
     )
-    .select(shareSelect)
+    .select(fallbackShareSelect)
     .single();
 
   if (error) {
@@ -132,7 +175,7 @@ export async function updateListSharePermission(shareId: string, identity: Share
     .update({ permission, updated_at: new Date().toISOString() })
     .eq("id", shareId)
     .eq("owner_user_id", identity.uid)
-    .select(shareSelect)
+    .select(fallbackShareSelect)
     .single();
 
   if (error) {
@@ -157,11 +200,25 @@ export async function getSharedLists(identity: ShareIdentity) {
   const supabase = requireSupabaseClient();
   const { data, error } = await supabase
     .from("list_shares")
-    .select(
-      "id, list_id, owner_user_id, shared_user_id, permission, created_at, updated_at, owner:profiles!list_shares_owner_user_id_fkey(id, email, name), list:shopping_lists(id, user_id, name, color, created_at, updated_at)"
-    )
+    .select(sharedListsSelect)
     .eq("shared_user_id", identity.uid)
     .order("created_at", { ascending: true });
+
+  if (error && isMissingAvatarColumn(error.message)) {
+    const fallback = await supabase
+      .from("list_shares")
+      .select(fallbackSharedListsSelect)
+      .eq("shared_user_id", identity.uid)
+      .order("created_at", { ascending: true });
+
+    if (fallback.error) {
+      throw new Error(`Nao foi possivel carregar listas compartilhadas: ${fallback.error.message}`);
+    }
+
+    return ((fallback.data ?? []) as RemoteShare[])
+      .filter((share) => Boolean(share.list))
+      .map((share) => toSharedShoppingList(share));
+  }
 
   if (error) {
     throw new Error(`Nao foi possivel carregar listas compartilhadas: ${error.message}`);
@@ -181,6 +238,8 @@ function toLocalShare(share: RemoteShare): ListShare {
     sharedUserId: share.shared_user_id,
     sharedUserEmail: profile?.email ?? "",
     sharedUserName: profile?.name ?? "Usuario compartilhado",
+    sharedUserAvatarUrl: profile?.avatar_url ?? undefined,
+    sharedUserAvatarPath: profile?.avatar_path ?? undefined,
     permission: share.permission,
     createdAt: Date.parse(share.created_at),
     updatedAt: Date.parse(share.updated_at)
@@ -199,10 +258,16 @@ function toSharedShoppingList(share: RemoteShare): ShoppingList {
     updatedAt: Date.parse(list.updated_at),
     sharedPermission: share.permission,
     ownerName: owner?.name,
-    ownerEmail: owner?.email
+    ownerEmail: owner?.email,
+    ownerAvatarUrl: owner?.avatar_url ?? undefined,
+    ownerAvatarPath: owner?.avatar_path ?? undefined
   };
 }
 
 function firstProfile(profile: RemoteProfile | RemoteProfile[] | null | undefined) {
   return Array.isArray(profile) ? profile[0] : profile;
+}
+
+function isMissingAvatarColumn(message: string) {
+  return message.includes("avatar_url") || message.includes("avatar_path");
 }
