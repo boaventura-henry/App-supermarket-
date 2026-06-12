@@ -1,240 +1,175 @@
-# App Supermarket
+# SuperList
 
-Projeto hibrido com o app Android Kotlin/Jetpack Compose original e uma camada web pronta para Netlify.
+SuperList e um app web/PWA para gerenciar listas de compras de supermercado.
 
-## Diagnostico tecnico
+O projeto atual e 100% web. A arquitetura Android/Kotlin antiga foi removida
+porque o produto final roda como SPA em Vercel usando React, Vite, TypeScript,
+Tailwind CSS e Supabase.
 
-O repositorio original e um projeto Android Kotlin com Gradle Kotlin DSL:
+## Stack oficial
 
-- Modulo Android: `app`
-- UI: Jetpack Compose e Material 3
-- Persistencia local: Room
-- Telas principais: autenticacao, lista de compras, cadastro/edicao de produtos, dashboard e historico de precos
-- Entidades principais: `User`, `Product` e `PriceHistory`
+- React
+- Vite
+- TypeScript
+- Tailwind CSS
+- Supabase Auth
+- Supabase Postgres via `@supabase/supabase-js`
+- Supabase Storage para foto de perfil
+- Prisma somente para schema, migrations e tarefas administrativas
+- Vercel para build e deploy
 
-Como a Netlify hospeda frontend estatico e funcoes serverless, o app Android foi preservado e foi criada uma camada web em React + Vite + TypeScript + Tailwind na raiz do repositorio. A interface web reaproveita os conceitos do app Android: autenticacao, produto, marca, quantidade, preco unitario, mercado, item comprado, dashboard e historico.
+Prisma nunca deve ser importado em componentes React ou codigo executado no
+navegador. Variaveis privadas de banco tambem nunca devem usar prefixo `VITE_`.
 
-Na versao Netlify, os dados ficam em um banco local do navegador (`localStorage`) com todos os registros separados por `userId`. Isso permite uso multiusuario no mesmo navegador sem depender de credenciais externas. Para sincronizacao entre dispositivos, a camada `src/storage.ts` pode ser substituida por Firebase, Supabase ou outro backend persistente mantendo os mesmos tipos de dominio.
+## Funcionalidades
 
-## Supabase Client direto
+- Cadastro, login, sessao e logout via Supabase Auth.
+- Perfil do usuario com nome, e-mail e foto.
+- Listas de compras proprias e compartilhadas.
+- Compartilhamento remoto de listas com permissao `viewer` ou `editor`.
+- Cadastro, edicao inline, exclusao e checklist de produtos.
+- Itens comprados movidos para o fim da lista sem perder a ordem original.
+- Historico de precos.
+- Dashboard e relatorios baseados nos dados remotos.
+- Tema claro/escuro.
+- Fallback local restrito a preferencias, tema e compatibilidade.
 
-O app web usa `@supabase/supabase-js` diretamente no frontend quando as variaveis publicas do Supabase estao configuradas. Prisma permanece no projeto para migrations, validacao de schema e tarefas administrativas; ele nunca deve ser importado no navegador.
+## Variaveis de ambiente
 
-Variaveis publicas usadas pelo React/Vite:
+Use `.env.example` como referencia. Nao commite `.env`.
 
-- `VITE_SUPABASE_URL`: Project URL do Supabase.
-- `VITE_SUPABASE_ANON_KEY`: anon public key do Supabase.
-
-Variaveis privadas usadas somente por backend/migrations:
-
-- `DATABASE_URL`: URL pooled do Supabase Postgres para runtime backend/serverless quando APIs administrativas forem usadas.
-- `DIRECT_URL`: URL direta do Supabase Postgres para migrations.
-
-Nunca coloque `DATABASE_URL`, `DIRECT_URL` ou service role key no frontend. Variaveis privadas nao podem ter prefixo `VITE_`.
-
-Com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` definidos, a fonte principal passa a ser:
-
-- Supabase Auth para login, cadastro, sessao e logout.
-- `shopping_lists` para listas.
-- `products` para produtos.
-- `price_history` para historico e dashboard.
-
-Sem as variaveis publicas do Supabase, o app conserva o fallback local via `localStorage` e a chave antiga `app-supermarket-db-v2`. Dados locais nao sao apagados automaticamente.
-
-Antes de usar a anon key em producao, aplique as migrations e execute o SQL de RLS em `docs/supabase-direct-client-rls.sql`. As policies garantem que cada usuario autenticado leia e altere apenas seus proprios dados.
-
-## Supabase Postgres + Prisma - fase 1
-
-Esta fase prepara o backend para uma migracao futura do `localStorage` para Supabase Postgres usando Prisma ORM. O frontend continua funcionando com `localStorage` e a chave `app-supermarket-db-v2`; nenhuma tela foi migrada para banco remoto nesta etapa.
-
-Arquivos principais:
-
-- `prisma/schema.prisma`: modelos `Profile`, `ShoppingList`, `Product`, `PriceHistory` e `PasskeyCredential`.
-- `prisma/migrations/20260604161701_init/migration.sql`: migration SQL inicial para Supabase/Postgres.
-- `src/server/prisma.ts`: instancia unica/reutilizavel do Prisma Client.
-- `api/health.ts`: health check simples para Vercel Functions.
-- `api/lists`: endpoints serverless para gerenciamento de listas via Prisma.
-- `api/products`: endpoints serverless para gerenciamento de produtos via Prisma.
-- `api/price-history`: endpoints serverless para historico de precos via Prisma.
-- `src/server/repositories/listRepository.ts`: operacoes Prisma para listas.
-- `src/server/services/listService.ts`: regras de negocio e validacoes da API de listas.
-- `src/server/repositories/productRepository.ts`: operacoes Prisma para produtos.
-- `src/server/services/productService.ts`: regras de negocio, ownership e validacoes da API de produtos.
-- `src/server/repositories/priceHistoryRepository.ts`: operacoes Prisma para historico de precos.
-- `src/server/services/priceHistoryService.ts`: filtros, ownership, normalizacao e criacao de historico.
-- `src/lib/supabaseClient.ts`: cliente Supabase direto usando anon key publica.
-- `src/services/authService.ts`: login, cadastro, sessao e logout via Supabase Auth.
-- `src/services/listApi.ts`: CRUD direto em `shopping_lists` via Supabase Client.
-- `src/services/productApi.ts`: CRUD direto em `products` via Supabase Client.
-- `src/services/priceHistoryApi.ts`: acesso direto a `price_history` via Supabase Client.
-- `docs/supabase-direct-client-rls.sql`: policies obrigatorias de Row Level Security.
-- `docs/supabase-prisma-setup.md`: configuracao completa e proximos passos.
-
-Variaveis obrigatorias na Vercel:
-
-- `VITE_SUPABASE_URL`: Project URL publica do Supabase.
-- `VITE_SUPABASE_ANON_KEY`: anon public key do Supabase.
-- `DATABASE_URL`: URL pooled do Supabase Postgres, usada somente por backend/migrations.
-- `DIRECT_URL`: URL direta do Supabase Postgres, usada somente por migrations.
-- `VITE_USE_REMOTE_PRICE_HISTORY`: feature flag nao sensivel. Use `false` para manter historico no `localStorage`; use `true` quando Dashboard/Histórico forem alimentados pela API.
-
-Nao coloque valores reais no codigo. Use `.env.example` apenas como modelo e configure os valores reais em `Vercel > Project Settings > Environment Variables`.
-
-Nenhuma migration foi criada ou aplicada porque esta fase nao recebeu uma
-conexao real. Consulte `docs/supabase-prisma-setup.md` antes de criar a primeira
-migration. O Prisma Client deve ser usado somente em `api/` ou outro backend;
-nunca importe Prisma diretamente em componentes React executados no navegador.
-
-## Supabase Postgres + Prisma - fase 3
-
-Esta fase prepara o CRUD remoto de produtos usando Vercel Functions, Prisma e Supabase Postgres. O `localStorage` continua ativo por padrao para preservar a experiencia atual e os dados antigos. A troca para API remota e controlada por `VITE_USE_REMOTE_PRODUCTS=true`.
-
-Endpoints de produtos:
-
-- `GET /api/lists/:listId/products`
-- `POST /api/lists/:listId/products`
-- `PUT /api/products/:id`
-- `DELETE /api/products/:id`
-- `PATCH /api/products/:id/purchased`
-
-Regras implementadas no backend:
-
-- Prisma roda apenas em `api/`/`src/server`, nunca no navegador.
-- Toda operacao valida a identidade temporaria por headers e ownership da lista/produto.
-- Usuarios podem visualizar produtos de listas compartilhadas, mas somente o criador da lista pode criar, editar, excluir ou marcar comprado.
-- `quantity` e `unitPrice` aceitam vazio e usam `Decimal` no banco.
-- `purchased` e `sortOrder` preservam a regra visual: itens nao comprados aparecem primeiro, comprados vao para o fim e, ao desmarcar, retornam para a ordem original.
-- `Valor total` segue calculado em runtime no frontend e nao e persistido.
-
-## Supabase Postgres + Prisma - fase 4
-
-Esta fase prepara o historico de precos remoto usando Vercel Functions, Prisma e Supabase Postgres. O `localStorage` permanece como fallback por padrao e a troca gradual e controlada por `VITE_USE_REMOTE_PRICE_HISTORY=true`.
-
-Endpoints de historico:
-
-- `GET /api/price-history`
-- `GET /api/price-history?productName=Arroz&supermarket=Mercado&monthStart=2026-01&monthEnd=2026-06`
-- `POST /api/price-history`
-- `GET /api/price-history/:id`
-- `DELETE /api/price-history/:id`
-
-Regras implementadas:
-
-- Prisma continua restrito ao backend/API.
-- Toda leitura e exclusao filtra pela identidade temporaria enviada nos headers.
-- `productId`, `listId` e `quantity` sao opcionais para manter compatibilidade com historicos antigos baseados apenas no nome do produto.
-- `price` usa `Decimal` no banco.
-- `createdAt` no Prisma registra a data do historico e alimenta filtros mensais.
-- Quando o CRUD remoto de produtos cria um produto com `unitPrice > 0`, a API gera historico automaticamente.
-- Quando a edicao remota altera `unitPrice` para um valor valido maior que zero, a API gera novo historico; salvar o mesmo valor novamente nao duplica registro.
-- Dashboard e tela de Historico carregam dados da API quando `VITE_USE_REMOTE_PRICE_HISTORY=true`; caso contrario seguem usando `localStorage`.
-
-## Por que Vite + React
-
-Vite + React foi escolhido porque a camada Netlify precisa ser uma SPA rapida, estatica e simples de publicar em `dist`. Next.js nao e necessario aqui porque nao ha SSR, rotas server-side complexas ou renderizacao incremental. As necessidades serverless foram isoladas em Netlify Functions.
-
-## Estrutura
+Variaveis publicas usadas pelo frontend:
 
 ```text
-.
-|-- app/                         # Android Kotlin original
-|-- .github/workflows/deploy.yml # CI/CD Netlify
-|-- netlify/functions/           # Serverless functions
-|-- public/_redirects            # SPA fallback e API redirect
-|-- src/                         # Frontend web React
-|   |-- storage.ts               # Banco local e isolamento por usuario
-|-- index.html
-|-- package.json
-|-- netlify.toml
-|-- vite.config.ts
-|-- tailwind.config.ts
-|-- tsconfig.json
-`-- build.gradle.kts
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+VITE_DEBUG_SUPABASE=false
+VITE_ENABLE_LOCAL_FALLBACK=false
 ```
 
-## Rodar a versao web localmente
+Variaveis privadas usadas somente por Prisma/backend/migrations:
+
+```text
+DATABASE_URL=
+DIRECT_URL=
+```
+
+Regras de seguranca:
+
+- Nunca exponha `DATABASE_URL` ou `DIRECT_URL` no frontend.
+- Nunca use service role key no frontend.
+- Configure valores reais na Vercel em Project Settings > Environment Variables.
+- Mantenha Row Level Security habilitado no Supabase.
+
+## Supabase
+
+Antes de usar em producao, aplique as migrations Prisma e o SQL de RLS:
+
+```text
+docs/supabase-direct-client-rls.sql
+```
+
+Para foto de perfil, siga:
+
+```text
+docs/profile-photo-storage-setup.md
+```
+
+Bucket esperado:
+
+```text
+profile-photos
+```
+
+## Desenvolvimento local
+
+Instale as dependencias:
 
 ```bash
 npm install
+```
+
+Rode o app:
+
+```bash
 npm run dev
 ```
 
-Abra `http://localhost:5173`.
+Abra:
 
-## Funcionalidades da versao web
+```text
+http://localhost:5173
+```
 
-- Login, criacao de conta, recuperacao de senha e logout.
-- Dados isolados por UID de usuario.
-- Cadastro, edicao e exclusao de produtos.
-- Campos: produto, marca, quantidade, valor unitario, supermercado e data automatica.
-- Checklist com status comprado/nao comprado.
-- Filtros por produto, supermercado e status.
-- Historico automatico de precos a cada cadastro/edicao.
-- Historico com filtros por produto, supermercado e mes.
-- Dashboard com variacao mensal de precos e comparacao entre supermercados.
+## Validacao
 
-## Validar antes do deploy
+Antes de abrir PR ou publicar:
 
 ```bash
 npm run lint
 npm run build
-npm run preview
+npm exec -- prisma validate
 ```
 
-O build de producao fica em `dist`.
-
-## Rodar o Android localmente
-
-1. Abra o repositorio no Android Studio.
-2. Aguarde a sincronizacao do Gradle.
-3. Crie `.env` na raiz se precisar de chaves locais.
-4. Execute o modulo `app` em emulador ou dispositivo fisico.
-
-## Netlify
-
-`netlify.toml` define:
-
-- Build command: `npm run build`
-- Publish directory: `dist`
-- Functions directory: `netlify/functions`
-- Redirect `/api/*` para `/.netlify/functions/:splat`
-- Fallback `/*` para `/index.html`
-
-## GitHub Actions
-
-O workflow `.github/workflows/deploy.yml` executa a cada push na branch `main`:
-
-1. Checkout do codigo
-2. Setup do Node.js LTS
-3. Instalacao das dependencias
-4. Lint
-5. Build
-6. Deploy em producao na Netlify
-
-Configure os secrets do repositorio em `Settings > Secrets and variables > Actions`:
-
-- `NETLIFY_AUTH_TOKEN`
-- `NETLIFY_SITE_ID`
-
-Depois disso, publicar uma nova versao e apenas:
+Comandos auxiliares:
 
 ```bash
-git push origin main
+npm run preview
+npm run test
+npm run typecheck
+npm run prisma:generate
+npm run prisma:validate
 ```
 
-## Deploy manual opcional
+## Deploy na Vercel
 
-```powershell
-$env:NETLIFY_AUTH_TOKEN="seu-token"
-$env:NETLIFY_SITE_ID="site-id-do-supermarketjon"
-.\scripts\deploy-netlify.ps1 -Production
+O deploy e feito pela Vercel a partir da branch `main`.
+
+Configuracao esperada:
+
+- Framework Preset: Vite
+- Build Command: `npm run build`
+- Output Directory: `dist`
+- Install Command: `npm install`
+
+O arquivo `vercel.json` fixa a configuracao de build:
+
+```json
+{
+  "framework": "vite",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist"
+}
 ```
 
-## Seguranca e CI/CD
+## Estrutura principal
 
-- Tokens ficam somente em GitHub Secrets ou variaveis locais.
-- Nenhuma credencial real e commitada.
-- O workflow usa permissao minima `contents: read`.
-- `concurrency` evita deploys simultaneos da mesma branch.
-- Lint e build bloqueiam deploy quebrado.
-- Headers de seguranca e cache de assets estao no `netlify.toml`.
+```text
+.
+|-- api/                  # Vercel Functions/admin APIs legadas
+|-- docs/                 # Relatorios, SQL e guias operacionais
+|-- netlify/              # Compatibilidade historica de deploy
+|-- prisma/               # Schema e migrations
+|-- public/               # Arquivos estaticos
+|-- scripts/              # Scripts auxiliares
+|-- server/               # Utilitarios backend legados
+|-- src/                  # Frontend web React
+|   |-- lib/              # Clientes externos, como Supabase
+|   |-- services/         # Servicos de Auth/listas/produtos/historico
+|   |-- App.tsx
+|   |-- main.tsx
+|   `-- styles.css
+|-- index.html
+|-- package.json
+|-- tailwind.config.ts
+|-- tsconfig.json
+|-- vite.config.ts
+`-- vercel.json
+```
+
+## PWA
+
+No estado atual nao ha `manifest.webmanifest` nem service worker versionado.
+Esses arquivos podem ser adicionados em uma proxima etapa para habilitar
+instalacao PWA, cache offline e icones dedicados.
