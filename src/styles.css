@@ -186,11 +186,11 @@
   }
 
   .app-header-inner {
-    @apply relative mx-auto grid max-w-7xl grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-2.5 sm:px-6 lg:px-8;
+    @apply mx-auto grid max-w-7xl grid-cols-[minmax(96px,1fr)_auto_minmax(48px,1fr)] items-center gap-2 px-5 py-2.5 sm:px-6 lg:px-8;
   }
 
   .app-header-title {
-    @apply pointer-events-none absolute left-1/2 flex -translate-x-1/2 items-center text-center text-supermarket-ink;
+    @apply pointer-events-none col-start-2 flex min-w-0 items-center justify-center text-center text-supermarket-ink;
   }
 
   .app-header-title h1 {
@@ -198,7 +198,7 @@
   }
 
   .profile-avatar-button {
-    @apply flex h-11 w-11 items-center justify-center rounded-full border border-supermarket-ink/10 bg-white transition hover:border-supermarket-leaf hover:shadow-soft;
+    @apply col-start-3 flex h-12 w-12 justify-self-end items-center justify-center rounded-full border border-supermarket-ink/10 bg-white transition hover:border-supermarket-leaf hover:shadow-soft;
   }
 
   .profile-avatar {
@@ -211,7 +211,7 @@
   }
 
   .profile-avatar-md {
-    @apply h-10 w-10 text-sm;
+    @apply h-11 w-11 text-sm;
   }
 
   .profile-avatar-lg {
