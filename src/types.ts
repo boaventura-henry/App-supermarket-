@@ -2,6 +2,8 @@ export type User = {
   uid: string;
   name: string;
   email: string;
+  avatarUrl?: string;
+  avatarPath?: string;
   passwordHash?: string;
   securityAnswerHash?: string;
   authProvider?: "local" | "supabase";
@@ -42,6 +44,8 @@ export type ShoppingList = {
   sharedPermission?: SharePermission;
   ownerName?: string;
   ownerEmail?: string;
+  ownerAvatarUrl?: string;
+  ownerAvatarPath?: string;
 };
 
 export type SharePermission = "viewer" | "editor";
@@ -53,6 +57,8 @@ export type ListShare = {
   sharedUserId: string;
   sharedUserEmail: string;
   sharedUserName: string;
+  sharedUserAvatarUrl?: string;
+  sharedUserAvatarPath?: string;
   permission: SharePermission;
   createdAt: number;
   updatedAt: number;
@@ -62,6 +68,8 @@ export type UserProfile = {
   id: string;
   name: string;
   email: string;
+  avatarUrl?: string;
+  avatarPath?: string;
 };
 
 export type PriceHistory = {
@@ -86,4 +94,4 @@ export type AppDatabase = {
   activeUserId: string | null;
 };
 
-export type View = "home" | "list" | "shared" | "sharing" | "dashboard" | "history";
+export type View = "home" | "list" | "shared" | "sharing" | "profile" | "dashboard" | "history";

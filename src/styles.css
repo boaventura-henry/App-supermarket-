@@ -186,11 +186,48 @@
   }
 
   .app-header-inner {
-    @apply mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:px-8;
+    @apply relative mx-auto grid max-w-7xl grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-2.5 sm:px-6 lg:px-8;
   }
 
-  .app-header-logo {
-    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-supermarket-leaf text-white sm:h-11 sm:w-11;
+  .app-header-title {
+    @apply pointer-events-none absolute left-1/2 flex -translate-x-1/2 items-center gap-2 text-supermarket-ink;
+  }
+
+  .app-header-title svg {
+    @apply text-supermarket-leaf;
+  }
+
+  .app-header-title h1 {
+    @apply text-xl font-black tracking-normal sm:text-2xl;
+  }
+
+  .profile-avatar-button {
+    @apply flex h-11 w-11 items-center justify-center rounded-full border border-supermarket-ink/10 bg-white transition hover:border-supermarket-leaf hover:shadow-soft;
+  }
+
+  .profile-avatar {
+    @apply inline-flex shrink-0 items-center justify-center rounded-full object-cover font-black uppercase text-supermarket-leaf ring-1 ring-supermarket-leaf/25;
+    background: linear-gradient(145deg, rgba(109, 247, 167, 0.22), rgba(255, 255, 255, 0.7));
+  }
+
+  .profile-avatar-sm {
+    @apply h-9 w-9 text-xs;
+  }
+
+  .profile-avatar-md {
+    @apply h-10 w-10 text-sm;
+  }
+
+  .profile-avatar-lg {
+    @apply h-20 w-20 text-2xl;
+  }
+
+  .profile-avatar-empty {
+    @apply text-supermarket-leaf;
+  }
+
+  .profile-photo-preview {
+    @apply rounded-full bg-supermarket-mint/50 p-2;
   }
 
   .nav-button,
@@ -674,6 +711,7 @@
   .theme-dark header,
   .theme-dark .bg-white,
   .theme-dark .panel,
+  .theme-dark .profile-avatar-button,
   .theme-dark .passkey-banner,
   .theme-dark .product-entry-panel,
   .theme-dark .shopping-list-card,
@@ -703,6 +741,15 @@
   .theme-dark .bg-supermarket-leaf,
   .theme-dark .bg-supermarket-leaf * {
     color: #00170d;
+  }
+
+  .theme-dark .app-header-title {
+    color: #e9fff3;
+  }
+
+  .theme-dark .profile-avatar {
+    background: linear-gradient(145deg, rgba(109, 247, 167, 0.2), rgba(2, 8, 6, 0.95));
+    color: #7dffb0;
   }
 
   .theme-dark .bg-supermarket-mint,
