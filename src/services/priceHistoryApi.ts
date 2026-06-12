@@ -1,6 +1,5 @@
 import type { PriceHistory, User } from "../types";
 import { isSupabaseConfigured, requireSupabaseClient } from "../lib/supabaseClient";
-import { getSharedLists } from "./shareApi";
 
 export const USE_REMOTE_PRICE_HISTORY = isSupabaseConfigured;
 
@@ -66,48 +65,13 @@ export async function getPriceHistory(identity: PriceHistoryIdentity, filters: P
     ownQuery = ownQuery.lt("created_at", nextMonthIso(filters.monthEnd));
   }
 
-  const [{ data, error }, sharedLists] = await Promise.all([ownQuery, getSharedLists(identity)]);
+  const { data, error } = await ownQuery;
 
   if (error) {
     throw new Error(`Nao foi possivel carregar o historico: ${error.message}`);
   }
 
-  const sharedListIds = sharedLists.map((list) => list.id);
-  let sharedData: RemotePriceHistory[] = [];
-  if (sharedListIds.length > 0) {
-    let sharedQuery = supabase
-      .from("price_history")
-      .select(historySelect)
-      .in("list_id", sharedListIds)
-      .order("created_at", { ascending: false });
-    if (filters.productName) {
-      sharedQuery = sharedQuery.ilike("product_name", `%${filters.productName}%`);
-    }
-    if (filters.supermarket) {
-      sharedQuery = sharedQuery.ilike("supermarket", `%${filters.supermarket}%`);
-    }
-    if (filters.brand) {
-      sharedQuery = sharedQuery.ilike("brand", `%${filters.brand}%`);
-    }
-    if (filters.monthStart) {
-      sharedQuery = sharedQuery.gte("created_at", `${filters.monthStart}-01T00:00:00.000Z`);
-    }
-    if (filters.monthEnd) {
-      sharedQuery = sharedQuery.lt("created_at", nextMonthIso(filters.monthEnd));
-    }
-    const { data: sharedHistory, error: sharedError } = await sharedQuery;
-    if (sharedError) {
-      throw new Error(`Nao foi possivel carregar historico compartilhado: ${sharedError.message}`);
-    }
-    sharedData = (sharedHistory ?? []) as RemotePriceHistory[];
-  }
-
-  const uniqueHistory = new Map<string, RemotePriceHistory>();
-  for (const item of [...((data ?? []) as RemotePriceHistory[]), ...sharedData]) {
-    uniqueHistory.set(item.id, item);
-  }
-
-  return Array.from(uniqueHistory.values())
+  return ((data ?? []) as RemotePriceHistory[])
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
     .map(toLocalPriceHistory);
 }
