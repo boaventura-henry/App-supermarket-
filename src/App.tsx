@@ -3880,23 +3880,23 @@ function SideMenu({
           <NavButton active={currentView === "home"} onClick={() => onNavigate("home")}>
             Home
           </NavButton>
-          <NavButton active={currentView === "list"} onClick={() => onNavigate("list")}>
-            Lista
+          <NavButton active={currentView === "sharing"} onClick={() => onNavigate("sharing")}>
+            Compartilhar listas
           </NavButton>
           <NavButton active={currentView === "shared"} onClick={() => onNavigate("shared")}>
             Outras listas
           </NavButton>
-          <NavButton active={currentView === "sharing"} onClick={() => onNavigate("sharing")}>
-            Compartilhar listas
-          </NavButton>
-          <NavButton active={currentView === "profile"} onClick={() => onNavigate("profile")}>
-            Perfil
+          <NavButton active={currentView === "list"} onClick={() => onNavigate("list")}>
+            Lista
           </NavButton>
           <NavButton active={currentView === "dashboard"} onClick={() => onNavigate("dashboard")}>
             Dashboard
           </NavButton>
           <NavButton active={currentView === "history"} onClick={() => onNavigate("history")}>
             Historico
+          </NavButton>
+          <NavButton active={currentView === "profile"} onClick={() => onNavigate("profile")}>
+            Perfil
           </NavButton>
         </nav>
 
