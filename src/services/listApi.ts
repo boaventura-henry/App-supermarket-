@@ -1,6 +1,5 @@
 import type { ShoppingList, User } from "../types";
 import { isSupabaseConfigured, requireSupabaseClient } from "../lib/supabaseClient";
-import { getSharedLists } from "./shareApi";
 
 export const USE_REMOTE_LISTS = isSupabaseConfigured;
 
@@ -27,7 +26,7 @@ export function toLocalShoppingList(list: RemoteShoppingList, localUserId = list
   };
 }
 
-export async function getLists(identity: ListIdentity) {
+export async function getMyLists(identity: ListIdentity) {
   const supabase = requireSupabaseClient();
   const { data, error } = await supabase
     .from("shopping_lists")
@@ -39,10 +38,10 @@ export async function getLists(identity: ListIdentity) {
     throw new Error(`Nao foi possivel carregar as listas: ${error.message}`);
   }
 
-  const ownedLists = ((data ?? []) as RemoteShoppingList[]).map((list) => toLocalShoppingList(list, identity.uid));
-  const sharedLists = await getSharedLists(identity);
-  return [...ownedLists, ...sharedLists];
+  return ((data ?? []) as RemoteShoppingList[]).map((list) => toLocalShoppingList(list, identity.uid));
 }
+
+export const getLists = getMyLists;
 
 export async function getList(id: string, identity: ListIdentity) {
   void identity;

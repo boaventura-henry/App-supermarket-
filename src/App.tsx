@@ -70,6 +70,7 @@ import {
 import {
   findProfileByEmail,
   getListShares,
+  getSharedLists as getRemoteSharedLists,
   getShareableProfiles,
   removeListShare,
   shareListWithUser,
@@ -246,15 +247,13 @@ function createPersistableDatabase(database: AppDatabase): AppDatabase {
   };
 }
 
-function getVisibleRemoteData(database: AppDatabase, userId: string) {
-  const lists = database.lists.filter((list) => list.userId === userId || Boolean(list.sharedPermission));
-  const visibleListIds = new Set(lists.map((list) => list.id));
+function getPersonalRemoteData(database: AppDatabase, userId: string) {
+  const lists = database.lists.filter((list) => list.userId === userId && !list.sharedPermission);
+  const ownListIds = new Set(lists.map((list) => list.id));
   return {
     lists,
-    products: database.products.filter((product) => visibleListIds.has(product.listId)),
-    priceHistory: database.priceHistory.filter(
-      (history) => history.userId === userId || (history.listId ? visibleListIds.has(history.listId) : false)
-    )
+    products: database.products.filter((product) => ownListIds.has(product.listId) && product.userId === userId),
+    priceHistory: database.priceHistory.filter((history) => history.userId === userId)
   };
 }
 
@@ -371,13 +370,28 @@ export function App() {
       return { lists: [], products: [], priceHistory: [] };
     }
     if (isSupabaseConfigured && !ENABLE_LOCAL_FALLBACK) {
-      return getVisibleRemoteData(database, currentUser.uid);
+      return getPersonalRemoteData(database, currentUser.uid);
     }
     return getUserData(database, currentUser.uid);
   }, [currentUser, database]);
 
   const showSupabaseDebug = import.meta.env.DEV || import.meta.env.VITE_DEBUG_SUPABASE === "true";
   const userListIds = useMemo(() => userData.lists.map((list) => list.id).sort().join("|"), [userData.lists]);
+  const sharedListIds = useMemo(
+    () =>
+      currentUser
+        ? database.lists
+            .filter((list) => list.sharedPermission && list.userId !== currentUser.uid)
+            .map((list) => list.id)
+            .sort()
+            .join("|")
+        : "",
+    [currentUser, database.lists]
+  );
+  const sharedListCount = useMemo(
+    () => (currentUser ? database.lists.filter((list) => list.sharedPermission && list.userId !== currentUser.uid).length : 0),
+    [currentUser, database.lists]
+  );
 
   useEffect(() => {
     if (!currentUser) {
@@ -434,6 +448,62 @@ export function App() {
       isMounted = false;
     };
   }, [currentUser, userListIds]);
+
+  useEffect(() => {
+    if (!USE_REMOTE_LISTS || !currentUser) {
+      return;
+    }
+
+    let isMounted = true;
+    setLastSupabaseOperation("select");
+    setLastSupabaseTable("list_shares");
+    getRemoteSharedLists(currentUser)
+      .then((sharedLists) => {
+        if (!isMounted) {
+          return;
+        }
+        setDatabase((current) => ({
+          ...current,
+          lists: [...current.lists.filter((list) => !list.sharedPermission), ...sharedLists]
+        }));
+        setLastSupabaseError("");
+      })
+      .catch((error) => {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel carregar listas compartilhadas."));
+        console.error("Nao foi possivel carregar listas compartilhadas.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
+
+  useEffect(() => {
+    const listIds = sharedListIds ? sharedListIds.split("|") : [];
+    if (!USE_REMOTE_PRODUCTS || !currentUser || view !== "shared" || listIds.length === 0) {
+      return;
+    }
+
+    let isMounted = true;
+    setLastSupabaseOperation("select");
+    setLastSupabaseTable("products");
+    Promise.all(listIds.map((listId) => getRemoteProducts(listId, currentUser)))
+      .then((productGroups) => {
+        if (!isMounted) {
+          return;
+        }
+        setDatabase((current) => replaceProductsForLists(current, listIds, productGroups.flat()));
+        setLastSupabaseError("");
+      })
+      .catch((error) => {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel carregar produtos compartilhados."));
+        console.error("Nao foi possivel carregar produtos compartilhados.", error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser, sharedListIds, view]);
 
   useEffect(() => {
     const ownedListIds = userData.lists
@@ -565,7 +635,7 @@ export function App() {
         }
         setDatabase((current) => ({
           ...current,
-          lists
+          lists: [...lists, ...current.lists.filter((list) => list.sharedPermission)]
         }));
         setLastSupabaseError("");
       })
@@ -1460,6 +1530,8 @@ export function App() {
           currentView={authMode}
           lastSupabaseOperation={lastSupabaseOperation}
           lastSupabaseTable={lastSupabaseTable}
+          sharedListCount={0}
+          dashboardProductCount={0}
         />
       </>
     );
@@ -1589,6 +1661,8 @@ export function App() {
         enabled={showSupabaseDebug}
         currentUser={currentUser}
         listCount={userData.lists.length}
+        sharedListCount={sharedListCount}
+        dashboardProductCount={userData.products.length}
         lastError={lastSupabaseError}
         lastAuthOperation={lastAuthOperation}
         lastAuthError={lastAuthError}
@@ -1862,6 +1936,8 @@ function SupabaseDebugPanel({
   enabled,
   currentUser,
   listCount,
+  sharedListCount,
+  dashboardProductCount,
   lastError,
   lastAuthOperation,
   lastAuthError,
@@ -1873,6 +1949,8 @@ function SupabaseDebugPanel({
   enabled: boolean;
   currentUser: User | null;
   listCount: number;
+  sharedListCount: number;
+  dashboardProductCount: number;
   lastError: string;
   lastAuthOperation: string;
   lastAuthError: string;
@@ -1895,7 +1973,10 @@ function SupabaseDebugPanel({
       <p>Tela atual: {currentView}</p>
       <p>Auth source: Supabase</p>
       <p>Usuario: {currentUser ? `${currentUser.name} (${currentUser.email})` : "sem sessao"}</p>
-      <p>Listas carregadas: {listCount}</p>
+      <p>Escopo da tela: {currentView === "shared" ? "listas compartilhadas" : "dados proprios"}</p>
+      <p>Listas proprias carregadas: {listCount}</p>
+      <p>Listas compartilhadas carregadas: {sharedListCount}</p>
+      <p>Produtos proprios no dashboard: {dashboardProductCount}</p>
       <p>Ultima operacao Auth: {lastAuthOperation || "nenhuma"}</p>
       <p>
         Ultima operacao Supabase: {lastSupabaseOperation || "nenhuma"}
