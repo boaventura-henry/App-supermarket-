@@ -190,11 +190,7 @@
   }
 
   .app-header-title {
-    @apply pointer-events-none absolute left-1/2 flex -translate-x-1/2 items-center gap-2 text-supermarket-ink;
-  }
-
-  .app-header-title svg {
-    @apply text-supermarket-leaf;
+    @apply pointer-events-none absolute left-1/2 flex -translate-x-1/2 items-center text-center text-supermarket-ink;
   }
 
   .app-header-title h1 {

@@ -1481,7 +1481,6 @@ export function App() {
             <span>Menu</span>
           </button>
           <div className="app-header-title">
-            <ShoppingBasket size={19} />
             <h1>SuperList</h1>
           </div>
           <button
