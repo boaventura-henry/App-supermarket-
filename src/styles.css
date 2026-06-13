@@ -186,7 +186,7 @@
   }
 
   .app-header-inner {
-    @apply mx-auto grid max-w-7xl grid-cols-[minmax(96px,1fr)_auto_minmax(48px,1fr)] items-center gap-2 px-5 py-2.5 sm:px-6 lg:px-8;
+    @apply mx-auto grid max-w-7xl grid-cols-[minmax(78px,1fr)_auto_minmax(48px,1fr)] items-center gap-2 px-4 py-2 sm:px-6 lg:px-8;
   }
 
   .app-header-title {
@@ -240,7 +240,31 @@
   }
 
   .menu-trigger {
-    @apply inline-flex min-h-10 shrink-0 items-center gap-2 rounded-2xl border border-supermarket-ink/15 bg-white px-3 py-2 text-sm font-bold text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf sm:px-4;
+    @apply inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-xl border border-supermarket-ink/15 bg-white px-2.5 py-1.5 text-xs font-bold text-supermarket-ink transition hover:border-supermarket-leaf hover:text-supermarket-leaf sm:min-h-9 sm:px-3 sm:text-sm;
+  }
+
+  .page-navigation {
+    @apply mx-auto flex max-w-7xl items-center justify-between gap-2 px-4 pt-4 sm:px-6 lg:px-8;
+  }
+
+  .page-back-button {
+    @apply inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-supermarket-ink/10 bg-white px-3 py-1.5 text-sm font-black text-supermarket-leaf transition hover:border-supermarket-leaf hover:bg-supermarket-mint;
+  }
+
+  .page-navigation-label {
+    @apply min-w-0 flex-1 truncate text-center text-xs font-black uppercase tracking-wide text-supermarket-ink/50;
+  }
+
+  .page-navigation-actions {
+    @apply flex shrink-0 items-center justify-end gap-2;
+  }
+
+  .page-icon-button {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-xl border border-supermarket-ink/10 bg-white text-supermarket-ink/60 transition hover:border-supermarket-leaf hover:text-supermarket-leaf;
+  }
+
+  .page-logout-button {
+    @apply inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-black text-red-700 transition hover:bg-red-100;
   }
 
   .side-menu-overlay {
@@ -924,6 +948,8 @@
   .theme-dark .nav-button,
   .theme-dark .theme-toggle,
   .theme-dark .menu-trigger,
+  .theme-dark .page-back-button,
+  .theme-dark .page-icon-button,
   .theme-dark .side-menu-close,
   .theme-dark .icon-button,
   .theme-dark .status-pending {
@@ -936,6 +962,8 @@
   .theme-dark .nav-button:hover,
   .theme-dark .theme-toggle:hover,
   .theme-dark .menu-trigger:hover,
+  .theme-dark .page-back-button:hover,
+  .theme-dark .page-icon-button:hover,
   .theme-dark .side-menu-close:hover,
   .theme-dark .icon-button:hover,
   .theme-dark .status-pending:hover,
@@ -988,6 +1016,12 @@
   }
 
   .theme-dark .side-menu-logout {
+    background: rgba(127, 29, 29, 0.28);
+    border-color: rgba(252, 165, 165, 0.34);
+    color: #fecaca;
+  }
+
+  .theme-dark .page-logout-button {
     background: rgba(127, 29, 29, 0.28);
     border-color: rgba(252, 165, 165, 0.34);
     color: #fecaca;
