@@ -1737,7 +1737,7 @@ function ProfileAvatar({
   user?: Pick<User, "name" | "email" | "avatarUrl"> | null;
   avatarUrl?: string;
   label?: string;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "menu";
 }) {
   const source = avatarUrl ?? user?.avatarUrl;
   const initials = getInitials(user?.name || user?.email || "");
@@ -1749,7 +1749,7 @@ function ProfileAvatar({
 
   return (
     <span className={`${className} profile-avatar-empty`} title={label}>
-      {initials || <UserCircle size={size === "lg" ? 34 : 20} />}
+      {initials || <UserCircle size={size === "menu" ? 42 : size === "lg" ? 34 : 20} />}
     </span>
   );
 }
@@ -4087,16 +4087,13 @@ function SideMenu({
         aria-hidden={!isOpen}
       >
         <div className="side-menu-header">
-          <div className="flex min-w-0 items-center gap-3">
-            <ProfileAvatar user={user} size="sm" />
-            <div className="min-w-0">
-            <p>Menu</p>
-            <h2>{userName}</h2>
-            </div>
-          </div>
           <button className="side-menu-close" type="button" onClick={onClose} aria-label="Fechar menu">
             <X size={22} />
           </button>
+          <div className="side-menu-user">
+            <ProfileAvatar user={user} size="menu" />
+            <h2>{userName}</h2>
+          </div>
         </div>
 
         <nav className="side-menu-nav" aria-label="Navegacao principal">
