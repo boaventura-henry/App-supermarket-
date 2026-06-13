@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
+  ArrowLeft,
   ArrowUpDown,
   BarChart3,
   Camera,
@@ -287,6 +288,7 @@ export function App() {
   const [sharingDebug, setSharingDebug] = useState({ selectedList: "", userCount: 0, shareCount: 0 });
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const viewHistoryRef = useRef<View[]>([]);
 
   useEffect(() => {
     saveDatabase(createPersistableDatabase(database));
@@ -784,6 +786,7 @@ export function App() {
     setPasskeyMessage("");
     setPasskeyError("");
     setAuthMessage("");
+    viewHistoryRef.current = [];
     setView("home");
   }
 
@@ -925,6 +928,7 @@ export function App() {
           item.id === passkey.id ? { ...item, lastUsedAt: Date.now() } : item
         )
       }));
+      viewHistoryRef.current = [];
       setView("home");
     } catch (err) {
       setAuthError(describePasskeyError(err));
@@ -963,6 +967,7 @@ export function App() {
       });
     }
     updateDatabase((current) => ({ ...current, activeUserId: null }));
+    viewHistoryRef.current = [];
     setView("home");
     setPendingPasskeyUserId(null);
     setSelectedListId(null);
@@ -973,11 +978,31 @@ export function App() {
   }
 
   function navigateTo(nextView: View) {
+    if (nextView !== view) {
+      viewHistoryRef.current = [...viewHistoryRef.current, view].slice(-12);
+    }
     setView(nextView);
     if (nextView === "list") {
       setSelectedListId(null);
     }
     setIsMenuOpen(false);
+  }
+
+  function goHome() {
+    viewHistoryRef.current = [];
+    setSelectedListId(null);
+    setEditingListId(null);
+    setIsMenuOpen(false);
+    setView("home");
+  }
+
+  function goBack() {
+    setIsMenuOpen(false);
+    const previousView = viewHistoryRef.current.pop() ?? "home";
+    setView(previousView);
+    if (previousView === "list") {
+      setSelectedListId(null);
+    }
   }
 
   async function saveShoppingList(form: ListForm) {
@@ -1630,6 +1655,15 @@ export function App() {
         user={currentUser}
       />
 
+      {view !== "home" ? (
+        <PageNavigation
+          currentView={view}
+          onBack={goBack}
+          onClose={view === "profile" ? goHome : undefined}
+          onLogout={view === "profile" ? logout : undefined}
+        />
+      ) : null}
+
       {view === "home" ? <Home products={userData.products} /> : null}
 
       {view === "list" ? (
@@ -1726,6 +1760,56 @@ export function App() {
       />
     </main>
   );
+}
+
+function PageNavigation({
+  currentView,
+  onBack,
+  onClose,
+  onLogout
+}: {
+  currentView: View;
+  onBack: () => void;
+  onClose?: () => void;
+  onLogout?: () => void;
+}) {
+  return (
+    <div className="page-navigation">
+      <button className="page-back-button" type="button" onClick={onBack}>
+        <ArrowLeft size={17} />
+        Voltar
+      </button>
+      <span className="page-navigation-label">{getViewTitle(currentView)}</span>
+      {onClose || onLogout ? (
+        <div className="page-navigation-actions">
+          {onClose ? (
+            <button className="page-icon-button" type="button" onClick={onClose} aria-label="Fechar perfil">
+              <X size={18} />
+            </button>
+          ) : null}
+          {onLogout ? (
+            <button className="page-logout-button" type="button" onClick={onLogout}>
+              <LogOut size={17} />
+              Sair
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function getViewTitle(view: View) {
+  const labels: Record<View, string> = {
+    home: "Home",
+    list: "Lista",
+    shared: "Outras listas",
+    sharing: "Compartilhar listas",
+    dashboard: "Dashboard",
+    history: "Historico",
+    profile: "Perfil"
+  };
+  return labels[view];
 }
 
 function ProfileAvatar({
