@@ -1,4 +1,4 @@
-import type { ListShare, SharePermission, ShoppingList, User, UserProfile } from "../types";
+import type { ListShare, Product, SharePermission, ShoppingList, User, UserProfile } from "../types";
 import { requireSupabaseClient } from "../lib/supabaseClient";
 
 export type ShareIdentity = Pick<User, "uid" | "email" | "name">;
@@ -38,6 +38,30 @@ type RemoteShare = {
   }[] | null;
 };
 
+type RemoteList = {
+  id: string;
+  user_id: string;
+  name: string;
+  color: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type RemoteProduct = {
+  id: string;
+  user_id: string;
+  list_id: string;
+  name: string;
+  brand: string | null;
+  quantity: number | string | null;
+  unit_price: number | string | null;
+  supermarket: string | null;
+  purchased: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 const shareSelect =
   "id, list_id, owner_user_id, shared_user_id, permission, created_at, updated_at, shared_user:profiles!list_shares_shared_user_id_fkey(id, email, name, avatar_url, avatar_path)";
 const fallbackShareSelect =
@@ -46,6 +70,24 @@ const sharedListsSelect =
   "id, list_id, owner_user_id, shared_user_id, permission, created_at, updated_at, owner:profiles!list_shares_owner_user_id_fkey(id, email, name, avatar_url, avatar_path), list:shopping_lists(id, user_id, name, color, created_at, updated_at)";
 const fallbackSharedListsSelect =
   "id, list_id, owner_user_id, shared_user_id, permission, created_at, updated_at, owner:profiles!list_shares_owner_user_id_fkey(id, email, name), list:shopping_lists(id, user_id, name, color, created_at, updated_at)";
+const productSelect =
+  "id, user_id, list_id, name, brand, quantity, unit_price, supermarket, purchased, sort_order, created_at, updated_at";
+const listSelect = "id, user_id, name, color, created_at, updated_at";
+
+export type CopyListResult = {
+  list: ShoppingList;
+  products: Product[];
+  shares: ListShare[];
+  copiedProducts: number;
+  copiedShares: number;
+};
+
+export type ApplySharesResult = {
+  updatedLists: number;
+  createdShares: number;
+  updatedShares: number;
+  ignoredUsers: number;
+};
 
 export async function findProfileByEmail(email: string) {
   const supabase = requireSupabaseClient();
@@ -132,6 +174,201 @@ export async function getListShares(listId: string, identity: ShareIdentity) {
   }
 
   return ((data ?? []) as RemoteShare[]).map(toLocalShare);
+}
+
+export async function copyListWithItemsAndShares(listId: string, identity: ShareIdentity): Promise<CopyListResult> {
+  const supabase = requireSupabaseClient();
+  const now = new Date().toISOString();
+  const { data: sourceList, error: sourceError } = await supabase
+    .from("shopping_lists")
+    .select(listSelect)
+    .eq("id", listId)
+    .eq("user_id", identity.uid)
+    .single();
+
+  if (sourceError || !sourceList) {
+    throw new Error(`Nao foi possivel copiar a lista: ${sourceError?.message ?? "lista propria nao encontrada"}`);
+  }
+
+  const { data: newList, error: newListError } = await supabase
+    .from("shopping_lists")
+    .insert({
+      user_id: identity.uid,
+      name: `${(sourceList as RemoteList).name} - Copia`,
+      color: (sourceList as RemoteList).color,
+      created_at: now,
+      updated_at: now
+    })
+    .select(listSelect)
+    .single();
+
+  if (newListError || !newList) {
+    throw new Error(`Nao foi possivel criar a copia da lista: ${newListError?.message ?? "erro desconhecido"}`);
+  }
+
+  const targetList = newList as RemoteList;
+  const [productsResult, sharesResult] = await Promise.all([
+    supabase.from("products").select(productSelect).eq("list_id", listId).order("sort_order", { ascending: true }),
+    supabase.from("list_shares").select(fallbackShareSelect).eq("list_id", listId).eq("owner_user_id", identity.uid)
+  ]);
+
+  if (productsResult.error) {
+    throw new Error(`Lista copiada, mas nao foi possivel carregar os produtos: ${productsResult.error.message}`);
+  }
+  if (sharesResult.error) {
+    throw new Error(`Lista copiada, mas nao foi possivel carregar os compartilhamentos: ${sharesResult.error.message}`);
+  }
+
+  const sourceProducts = (productsResult.data ?? []) as RemoteProduct[];
+  let copiedProducts: Product[] = [];
+  if (sourceProducts.length > 0) {
+    const { data: insertedProducts, error: productsError } = await supabase
+      .from("products")
+      .insert(
+        sourceProducts.map((product) => ({
+          user_id: identity.uid,
+          list_id: targetList.id,
+          name: product.name,
+          brand: product.brand,
+          quantity: product.quantity,
+          unit_price: product.unit_price,
+          supermarket: product.supermarket,
+          purchased: product.purchased,
+          sort_order: product.sort_order,
+          created_at: now,
+          updated_at: now
+        }))
+      )
+      .select(productSelect);
+
+    if (productsError) {
+      throw new Error(`Lista copiada, mas os produtos nao foram copiados: ${productsError.message}`);
+    }
+    copiedProducts = ((insertedProducts ?? []) as RemoteProduct[]).map(toLocalProduct);
+  }
+
+  const uniqueShares = uniqueShareTargets((sharesResult.data ?? []) as RemoteShare[], identity.uid);
+  let copiedShares: ListShare[] = [];
+  if (uniqueShares.length > 0) {
+    const { data: insertedShares, error: sharesError } = await supabase
+      .from("list_shares")
+      .upsert(
+        uniqueShares.map((share) => ({
+          list_id: targetList.id,
+          owner_user_id: identity.uid,
+          shared_user_id: share.shared_user_id,
+          permission: share.permission,
+          created_at: now,
+          updated_at: now
+        })),
+        { onConflict: "list_id,shared_user_id" }
+      )
+      .select(fallbackShareSelect);
+
+    if (sharesError) {
+      throw new Error(`Lista copiada, mas os compartilhamentos nao foram copiados: ${sharesError.message}`);
+    }
+    copiedShares = ((insertedShares ?? []) as RemoteShare[]).map(toLocalShare);
+  }
+
+  return {
+    list: toLocalOwnedList(targetList, identity.uid),
+    products: copiedProducts,
+    shares: copiedShares,
+    copiedProducts: copiedProducts.length,
+    copiedShares: copiedShares.length
+  };
+}
+
+export async function applySharesToAllMyLists(sourceListId: string, identity: ShareIdentity): Promise<ApplySharesResult> {
+  const supabase = requireSupabaseClient();
+  const [{ data: sourceList, error: sourceListError }, { data: sourceShares, error: sourceSharesError }, { data: lists, error: listsError }] =
+    await Promise.all([
+      supabase.from("shopping_lists").select("id").eq("id", sourceListId).eq("user_id", identity.uid).single(),
+      supabase.from("list_shares").select(fallbackShareSelect).eq("list_id", sourceListId).eq("owner_user_id", identity.uid),
+      supabase.from("shopping_lists").select("id").eq("user_id", identity.uid)
+    ]);
+
+  if (sourceListError || !sourceList) {
+    throw new Error(`Lista base nao encontrada: ${sourceListError?.message ?? "lista propria obrigatoria"}`);
+  }
+  if (sourceSharesError) {
+    throw new Error(`Nao foi possivel carregar compartilhamentos da lista base: ${sourceSharesError.message}`);
+  }
+  if (listsError) {
+    throw new Error(`Nao foi possivel carregar suas listas: ${listsError.message}`);
+  }
+
+  const shareTemplates = uniqueShareTargets((sourceShares ?? []) as RemoteShare[], identity.uid);
+  const targetListIds = ((lists ?? []) as { id: string }[])
+    .map((list) => list.id)
+    .filter((id) => id !== sourceListId);
+
+  if (shareTemplates.length === 0 || targetListIds.length === 0) {
+    return { updatedLists: 0, createdShares: 0, updatedShares: 0, ignoredUsers: (sourceShares ?? []).length - shareTemplates.length };
+  }
+
+  const { data: existingShares, error: existingError } = await supabase
+    .from("list_shares")
+    .select("id, list_id, owner_user_id, shared_user_id, permission, created_at, updated_at")
+    .eq("owner_user_id", identity.uid)
+    .in("list_id", targetListIds);
+
+  if (existingError) {
+    throw new Error(`Nao foi possivel validar compartilhamentos existentes: ${existingError.message}`);
+  }
+
+  const existingByTarget = new Map(
+    ((existingShares ?? []) as RemoteShare[]).map((share) => [`${share.list_id}:${share.shared_user_id}`, share])
+  );
+  const now = new Date().toISOString();
+  const rowsToUpsert: Array<{
+    list_id: string;
+    owner_user_id: string;
+    shared_user_id: string;
+    permission: SharePermission;
+    updated_at: string;
+  }> = [];
+  let createdShares = 0;
+  let updatedShares = 0;
+  const touchedListIds = new Set<string>();
+
+  for (const listId of targetListIds) {
+    for (const share of shareTemplates) {
+      const key = `${listId}:${share.shared_user_id}`;
+      const existing = existingByTarget.get(key);
+      if (existing?.permission === share.permission) {
+        continue;
+      }
+      rowsToUpsert.push({
+        list_id: listId,
+        owner_user_id: identity.uid,
+        shared_user_id: share.shared_user_id,
+        permission: share.permission,
+        updated_at: now
+      });
+      touchedListIds.add(listId);
+      if (existing) {
+        updatedShares += 1;
+      } else {
+        createdShares += 1;
+      }
+    }
+  }
+
+  if (rowsToUpsert.length > 0) {
+    const { error: upsertError } = await supabase.from("list_shares").upsert(rowsToUpsert, { onConflict: "list_id,shared_user_id" });
+    if (upsertError) {
+      throw new Error(`Nao foi possivel aplicar compartilhamentos em massa: ${upsertError.message}`);
+    }
+  }
+
+  return {
+    updatedLists: touchedListIds.size,
+    createdShares,
+    updatedShares,
+    ignoredUsers: (sourceShares ?? []).length - shareTemplates.length
+  };
 }
 
 export async function shareListWithUser(
@@ -262,6 +499,53 @@ function toSharedShoppingList(share: RemoteShare): ShoppingList {
     ownerAvatarUrl: owner?.avatar_url ?? undefined,
     ownerAvatarPath: owner?.avatar_path ?? undefined
   };
+}
+
+function toLocalOwnedList(list: RemoteList, userId: string): ShoppingList {
+  return {
+    id: list.id,
+    userId,
+    name: list.name,
+    color: list.color,
+    createdAt: Date.parse(list.created_at),
+    updatedAt: Date.parse(list.updated_at)
+  };
+}
+
+function toLocalProduct(product: RemoteProduct): Product {
+  const timestamp = Date.parse(product.created_at);
+  return {
+    id: product.id,
+    userId: product.user_id,
+    listId: product.list_id,
+    name: product.name,
+    brand: product.brand ?? "",
+    quantity: normalizeNumber(product.quantity),
+    unitPrice: normalizeNumber(product.unit_price),
+    supermarket: product.supermarket ?? "",
+    timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
+    isBought: product.purchased,
+    sortOrder: Number.isFinite(product.sort_order) ? product.sort_order : 0
+  };
+}
+
+function uniqueShareTargets(shares: RemoteShare[], currentUserId: string) {
+  const unique = new Map<string, RemoteShare>();
+  for (const share of shares) {
+    if (!share.shared_user_id || share.shared_user_id === currentUserId) {
+      continue;
+    }
+    unique.set(share.shared_user_id, share);
+  }
+  return Array.from(unique.values());
+}
+
+function normalizeNumber(value: number | string | null) {
+  if (value === null) {
+    return null;
+  }
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function firstProfile(profile: RemoteProfile | RemoteProfile[] | null | undefined) {

@@ -5,6 +5,7 @@ import {
   Camera,
   CheckCircle2,
   Circle,
+  Copy,
   Edit3,
   Eye,
   EyeOff,
@@ -69,6 +70,8 @@ import {
 } from "./services/priceHistoryApi";
 import {
   findProfileByEmail,
+  applySharesToAllMyLists,
+  copyListWithItemsAndShares,
   getListShares,
   getSharedLists as getRemoteSharedLists,
   getShareableProfiles,
@@ -1053,6 +1056,30 @@ export function App() {
     setEditingListId(null);
   }
 
+  async function copyShoppingList(listId: string) {
+    if (!currentUser) {
+      return;
+    }
+    setLastSupabaseOperation("copy");
+    setLastSupabaseTable("shopping_lists");
+    const result = await copyListWithItemsAndShares(listId, currentUser);
+    updateDatabase((current) => ({
+      ...current,
+      lists: [...current.lists.filter((list) => list.id !== result.list.id), result.list],
+      products: [
+        ...current.products.filter((product) => product.listId !== result.list.id),
+        ...result.products
+      ]
+    }));
+    setListShares((current) => {
+      const copiedIds = new Set(result.shares.map((share) => share.id));
+      return [...current.filter((share) => !copiedIds.has(share.id)), ...result.shares];
+    });
+    setSelectedListId(result.list.id);
+    setEditingListId(null);
+    setLastSupabaseError("");
+  }
+
   async function shareShoppingList(listId: string, form: ShareForm) {
     if (!currentUser) {
       return;
@@ -1109,6 +1136,30 @@ export function App() {
     await removeListShare(shareId, currentUser);
     setListShares((current) => current.filter((share) => share.id !== shareId));
     setLastSupabaseError("");
+  }
+
+  async function applySharesToAllLists(sourceListId: string) {
+    if (!currentUser) {
+      throw new Error("Faca login para aplicar compartilhamentos.");
+    }
+    setLastSupabaseOperation("bulk-upsert");
+    setLastSupabaseTable("list_shares");
+    const result = await applySharesToAllMyLists(sourceListId, currentUser);
+    const ownedListIds = userData.lists
+      .filter((list) => list.userId === currentUser.uid && list.id !== sourceListId && !list.sharedPermission)
+      .map((list) => list.id);
+    const loadedShares = await Promise.all(ownedListIds.map((listId) => getListShares(listId, currentUser)));
+    const refreshedShares = loadedShares.flat();
+    setListShares((current) => {
+      const refreshedIds = new Set(refreshedShares.map((share) => share.id));
+      const refreshedListIds = new Set(ownedListIds);
+      return [
+        ...current.filter((share) => !refreshedIds.has(share.id) && !refreshedListIds.has(share.listId)),
+        ...refreshedShares
+      ];
+    });
+    setLastSupabaseError("");
+    return result;
   }
 
   async function saveUserProfile(form: ProfileForm) {
@@ -1597,6 +1648,7 @@ export function App() {
           onCancelList={() => setEditingListId(null)}
           onSaveList={saveShoppingList}
           onDeleteList={deleteShoppingList}
+          onCopyList={copyShoppingList}
           onShareList={shareShoppingList}
           onUpdateShare={updateShoppingListShare}
           onRemoveShare={deleteShoppingListShare}
@@ -1641,6 +1693,7 @@ export function App() {
           onShareUser={shareShoppingListWithProfile}
           onUpdateShare={updateShoppingListShare}
           onRemoveShare={deleteShoppingListShare}
+          onApplySharesToAll={applySharesToAllLists}
           onDebugChange={setSharingDebug}
         />
       ) : null}
@@ -1789,6 +1842,12 @@ function ProfileScreen({
     }
   }
 
+  function selectAvatarFile(file?: File | null) {
+    setError("");
+    setMessage("");
+    setAvatarFile(file ?? null);
+  }
+
   async function submitPassword(event: FormEvent) {
     event.preventDefault();
     setError("");
@@ -1854,20 +1913,33 @@ function ProfileScreen({
               <p className="text-sm font-semibold text-supermarket-ink/60">JPG, PNG ou WEBP ate 5 MB.</p>
             </div>
           </div>
-          <label className="field">
-            <span>Galeria ou camera</span>
-            <input
-              className="input file:mr-3 file:rounded-xl file:border-0 file:bg-supermarket-leaf file:px-3 file:py-2 file:text-sm file:font-bold file:text-white"
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={(event) => {
-                setError("");
-                setMessage("");
-                setAvatarFile(event.target.files?.[0] ?? null);
-              }}
-            />
-          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="button-secondary cursor-pointer justify-center">
+              <ImagePlus size={18} />
+              Escolher da galeria
+              <input
+                className="sr-only"
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  selectAvatarFile(event.target.files?.[0]);
+                }}
+              />
+            </label>
+            <label className="button-secondary cursor-pointer justify-center">
+              <Camera size={18} />
+              Tirar foto
+              <input
+                className="sr-only"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={(event) => {
+                  selectAvatarFile(event.target.files?.[0]);
+                }}
+              />
+            </label>
+          </div>
           <div className="flex flex-wrap gap-3">
             <button className="button-primary justify-center" type="submit" disabled={isSavingAvatar || !avatarFile}>
               <ImagePlus size={18} />
@@ -1875,7 +1947,7 @@ function ProfileScreen({
             </button>
             <span className="inline-flex items-center gap-2 text-sm font-bold text-supermarket-ink/60">
               <Camera size={16} />
-              Galeria ou camera do dispositivo
+              {avatarFile ? avatarFile.name : "Escolha uma imagem ou tire uma nova foto"}
             </span>
           </div>
         </form>
@@ -2350,6 +2422,7 @@ function ShoppingList({
   onCancelList,
   onSaveList,
   onDeleteList,
+  onCopyList,
   onShareList,
   onUpdateShare,
   onRemoveShare,
@@ -2376,6 +2449,7 @@ function ShoppingList({
   onCancelList: () => void;
   onSaveList: (form: ListForm) => void | Promise<void>;
   onDeleteList: (listId: string) => void | Promise<void>;
+  onCopyList?: (listId: string) => void | Promise<void>;
   onShareList: (listId: string, form: ShareForm) => void | Promise<void>;
   onUpdateShare: (shareId: string, permission: SharePermission) => void | Promise<void>;
   onRemoveShare: (shareId: string) => void | Promise<void>;
@@ -2559,6 +2633,22 @@ function ShoppingList({
                   </button>
                   {canEditList ? (
                     <div className="list-card-actions">
+                      {allowCreateList && onCopyList ? (
+                        <button
+                          className="icon-button"
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`Copiar a lista "${list.name}" com produtos e compartilhamentos?`)) {
+                              void Promise.resolve(onCopyList(list.id)).catch((error) => {
+                                window.alert(error instanceof Error ? error.message : "Nao foi possivel copiar a lista.");
+                              });
+                            }
+                          }}
+                          aria-label="Copiar lista"
+                        >
+                          <Copy size={16} />
+                        </button>
+                      ) : null}
                       <button className="icon-button" type="button" onClick={() => onEditList(list.id)} aria-label="Editar lista">
                         <Edit3 size={16} />
                       </button>
@@ -3403,6 +3493,7 @@ function ShareListsScreen({
   onShareUser,
   onUpdateShare,
   onRemoveShare,
+  onApplySharesToAll,
   onDebugChange
 }: {
   lists: ShoppingList[];
@@ -3413,12 +3504,19 @@ function ShareListsScreen({
   onShareUser: (listId: string, profileId: string, permission: SharePermission) => void | Promise<void>;
   onUpdateShare: (shareId: string, permission: SharePermission) => void | Promise<void>;
   onRemoveShare: (shareId: string) => void | Promise<void>;
+  onApplySharesToAll: (listId: string) => Promise<{
+    updatedLists: number;
+    createdShares: number;
+    updatedShares: number;
+    ignoredUsers: number;
+  }>;
   onDebugChange: (debug: { selectedList: string; userCount: number; shareCount: number }) => void;
 }) {
   const [selectedListId, setSelectedListId] = useState("");
   const [query, setQuery] = useState("");
   const [draftPermissions, setDraftPermissions] = useState<Record<string, SharePermission>>({});
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
+  const [isApplyingToAll, setIsApplyingToAll] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -3511,6 +3609,36 @@ function ShareListsScreen({
     }
   }
 
+  async function applySelectedSharesToAllLists() {
+    if (!selectedList) {
+      return;
+    }
+    if (selectedShares.length === 0) {
+      setError("Adicione ao menos um usuario compartilhado antes de aplicar em todas as listas.");
+      setMessage("");
+      return;
+    }
+    const confirmed = window.confirm(
+      "Aplicar estes compartilhamentos em todas as suas listas proprias? Permissoes existentes serao atualizadas quando necessario."
+    );
+    if (!confirmed) {
+      return;
+    }
+    setError("");
+    setMessage("");
+    setIsApplyingToAll(true);
+    try {
+      const result = await onApplySharesToAll(selectedList.id);
+      setMessage(
+        `Compartilhamentos aplicados. Listas atualizadas: ${result.updatedLists}. Criados: ${result.createdShares}. Atualizados: ${result.updatedShares}. Ignorados: ${result.ignoredUsers}.`
+      );
+    } catch (err) {
+      setError(getErrorMessage(err, "Nao foi possivel aplicar os compartilhamentos em todas as listas."));
+    } finally {
+      setIsApplyingToAll(false);
+    }
+  }
+
   return (
     <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -3555,6 +3683,20 @@ function ShareListsScreen({
               <strong className="block text-lg">{selectedList.name}</strong>
               <p className="mt-1 text-sm font-semibold text-supermarket-ink/60">
                 {selectedSummary.items} {selectedSummary.items === 1 ? "item" : "itens"} - {selectedSummary.shared} usuarios com acesso
+              </p>
+              <button
+                className="button-secondary mt-4 w-full justify-center"
+                type="button"
+                disabled={selectedShares.length === 0 || isApplyingToAll}
+                onClick={() => {
+                  void applySelectedSharesToAllLists();
+                }}
+              >
+                <UserPlus size={16} />
+                {isApplyingToAll ? "Aplicando..." : "Aplicar a todas as listas"}
+              </button>
+              <p className="mt-2 text-xs font-semibold text-supermarket-ink/50">
+                Copia os usuarios e permissoes desta lista para suas outras listas proprias.
               </p>
             </div>
           ) : (
