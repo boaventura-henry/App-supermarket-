@@ -94,4 +94,4 @@ export type AppDatabase = {
   activeUserId: string | null;
 };
 
-export type View = "home" | "list" | "shared" | "sharing" | "profile" | "dashboard" | "history";
+export type View = "home" | "list" | "shared" | "sharing" | "profile" | "dashboard" | "history" | "prediction";
