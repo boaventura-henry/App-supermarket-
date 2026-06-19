@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent, type ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowUpDown,
   BarChart3,
+  CalendarClock,
   Camera,
   CheckCircle2,
   Circle,
@@ -28,6 +29,7 @@ import {
   ShoppingCart,
   Store,
   Sun,
+  Target,
   Trash2,
   X,
   UserCircle,
@@ -212,6 +214,16 @@ function productToEditDraft(product: Product): ProductEditDraft {
     unitPrice: product.unitPrice !== null ? product.unitPrice.toFixed(2).replace(".", ",") : "",
     supermarket: product.supermarket || ""
   };
+}
+
+function productDraftHasChanges(product: Product, draft: ProductEditDraft) {
+  const original = productToEditDraft(product);
+  return (
+    original.brand !== draft.brand ||
+    original.quantity !== draft.quantity ||
+    original.unitPrice !== draft.unitPrice ||
+    original.supermarket !== draft.supermarket
+  );
 }
 
 function loadTheme(): ThemeMode {
@@ -1394,15 +1406,18 @@ export function App() {
     }));
   }
 
-  function saveProductInline(productId: string, draft: ProductEditDraft) {
+  async function saveProductInline(productId: string, draft: ProductEditDraft) {
     if (!currentUser) {
-      return;
+      throw new Error("Faca login novamente para salvar o produto.");
     }
 
     const parsedQuantity = parseOptionalNumber(draft.quantity);
     const parsedPrice = parseMoney(draft.unitPrice);
-    if (parsedQuantity === undefined || parsedPrice === undefined) {
-      return;
+    if (parsedQuantity === undefined) {
+      throw new Error("Informe uma quantidade valida ou deixe em branco.");
+    }
+    if (parsedPrice === undefined) {
+      throw new Error("Informe um valor unitario valido ou deixe em branco.");
     }
 
     const nextBrand = draft.brand.trim();
@@ -1410,71 +1425,81 @@ export function App() {
     const nextUnitPrice = draft.unitPrice.trim() === "" || parsedPrice === null ? null : parsedPrice;
     const nextSupermarket = draft.supermarket.trim();
     const timestamp = Date.now();
+    const target = database.products.find((product) => product.id === productId && canEditProductsInList(product.listId));
+    if (!target) {
+      throw new Error("Produto nao encontrado ou sem permissao para editar.");
+    }
+    const hasChanges =
+      (target.brand ?? "") !== nextBrand ||
+      target.quantity !== nextQuantity ||
+      target.unitPrice !== nextUnitPrice ||
+      target.supermarket !== nextSupermarket;
+    if (!hasChanges) {
+      return;
+    }
 
     if (USE_REMOTE_PRODUCTS) {
       setLastSupabaseOperation("update");
       setLastSupabaseTable("products");
-      const target = database.products.find((product) => product.id === productId && canEditProductsInList(product.listId));
-      if (!target) {
-        return;
+      try {
+        const updated = await updateRemoteProduct(productId, currentUser, {
+          brand: nextBrand,
+          quantity: nextQuantity,
+          unitPrice: nextUnitPrice,
+          supermarket: nextSupermarket
+        });
+        const historyPrice =
+          typeof nextUnitPrice === "number" && nextUnitPrice > 0 && nextUnitPrice !== target.unitPrice ? nextUnitPrice : null;
+        updateDatabase((current) => ({
+          ...upsertProduct(current, updated),
+          priceHistory:
+            !USE_REMOTE_PRICE_HISTORY && historyPrice !== null
+              ? [
+                  ...current.priceHistory,
+                  {
+                    id: createId("hist"),
+                    userId: currentUser.uid,
+                    listId: target.listId,
+                    productName: target.name,
+                    brand: nextBrand,
+                    price: historyPrice,
+                    supermarket: nextSupermarket,
+                    timestamp
+                  }
+                ]
+              : current.priceHistory,
+          lists: current.lists.map((list) => (list.id === target.listId ? { ...list, updatedAt: timestamp } : list))
+        }));
+        setLastSupabaseError("");
+        await refreshRemotePriceHistory(currentUser).catch((error) => {
+          setLastSupabaseError(getErrorMessage(error, "Nao foi possivel atualizar o historico remoto."));
+          console.error("Nao foi possivel atualizar o historico remoto.", error);
+        });
+      } catch (error) {
+        setLastSupabaseError(getErrorMessage(error, "Nao foi possivel atualizar o produto."));
+        console.error("Nao foi possivel atualizar o produto.", error);
+        throw error;
       }
-      void updateRemoteProduct(productId, currentUser, {
-        brand: nextBrand,
-        quantity: nextQuantity,
-        unitPrice: nextUnitPrice,
-        supermarket: nextSupermarket
-      })
-        .then((updated) => {
-          const historyPrice =
-            typeof nextUnitPrice === "number" && nextUnitPrice > 0 && nextUnitPrice !== target.unitPrice ? nextUnitPrice : null;
-          updateDatabase((current) => ({
-            ...upsertProduct(current, updated),
-            priceHistory:
-              !USE_REMOTE_PRICE_HISTORY && historyPrice !== null
-                ? [
-                    ...current.priceHistory,
-                    {
-                      id: createId("hist"),
-                      userId: currentUser.uid,
-                      listId: target.listId,
-                      productName: target.name,
-                      brand: nextBrand,
-                      price: historyPrice,
-                      supermarket: nextSupermarket,
-                      timestamp
-                    }
-                  ]
-                : current.priceHistory,
-            lists: current.lists.map((list) => (list.id === target.listId ? { ...list, updatedAt: timestamp } : list))
-          }));
-          void refreshRemotePriceHistory(currentUser).catch((error) =>
-            reportRemoteProductError(error, "Nao foi possivel atualizar o historico remoto.")
-          );
-        })
-        .catch((error) => reportRemoteProductError(error, "Nao foi possivel atualizar o produto."));
       return;
     }
 
-    const targetForRemoteHistory = database.products.find((product) => product.id === productId && canEditProductsInList(product.listId));
     if (
       USE_REMOTE_PRICE_HISTORY &&
-      targetForRemoteHistory &&
       typeof nextUnitPrice === "number" &&
       nextUnitPrice > 0 &&
-      nextUnitPrice !== targetForRemoteHistory.unitPrice
+      nextUnitPrice !== target.unitPrice
     ) {
-      void createRemotePriceHistory(currentUser, {
-        ...(USE_REMOTE_LISTS ? { listId: targetForRemoteHistory.listId } : {}),
+      await createRemotePriceHistory(currentUser, {
+        ...(USE_REMOTE_LISTS ? { listId: target.listId } : {}),
         ...(USE_REMOTE_PRODUCTS ? { productId } : {}),
-        productName: targetForRemoteHistory.name,
+        productName: target.name,
         brand: nextBrand,
         quantity: nextQuantity,
         price: nextUnitPrice,
         supermarket: nextSupermarket,
         createdAt: new Date(timestamp).toISOString()
-      })
-        .then(() => refreshRemotePriceHistory(currentUser))
-        .catch((error) => reportRemoteProductError(error, "Nao foi possivel salvar o historico remoto."));
+      });
+      await refreshRemotePriceHistory(currentUser);
     }
 
     updateDatabase((current) => {
@@ -1736,6 +1761,8 @@ export function App() {
 
       {view === "history" ? <HistoryView priceHistory={userData.priceHistory} /> : null}
 
+      {view === "prediction" ? <PredictionList products={userData.products} /> : null}
+
       {view === "profile" ? (
         <ProfileScreen
           user={currentUser}
@@ -1804,9 +1831,10 @@ function getViewTitle(view: View) {
     home: "Home",
     list: "Lista",
     shared: "Outras listas",
-    sharing: "Compartilhar listas",
+    sharing: "Compartilhar lista",
     dashboard: "Dashboard",
-    history: "Historico",
+    history: "Histórico",
+    prediction: "Predição Lista",
     profile: "Perfil"
   };
   return labels[view];
@@ -1821,7 +1849,7 @@ function ProfileAvatar({
   user?: Pick<User, "name" | "email" | "avatarUrl"> | null;
   avatarUrl?: string;
   label?: string;
-  size?: "sm" | "md" | "lg" | "menu";
+  size?: "sm" | "md" | "lg" | "menu" | "list";
 }) {
   const source = avatarUrl ?? user?.avatarUrl;
   const initials = getInitials(user?.name || user?.email || "");
@@ -1833,7 +1861,7 @@ function ProfileAvatar({
 
   return (
     <span className={`${className} profile-avatar-empty`} title={label}>
-      {initials || <UserCircle size={size === "menu" ? 42 : size === "lg" ? 34 : 20} />}
+      {initials || <UserCircle size={size === "menu" ? 42 : size === "lg" ? 34 : size === "list" ? 22 : 20} />}
     </span>
   );
 }
@@ -2539,7 +2567,7 @@ function ShoppingList({
   onRemoveShare: (shareId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void | Promise<void>;
   onToggleBought: (productId: string) => void;
-  onInlineChange: (productId: string, draft: ProductEditDraft) => void;
+  onInlineChange: (productId: string, draft: ProductEditDraft) => Promise<void>;
   onClearFields: (listId: string, fields: ClearProductFields) => void;
   onDeleteProduct: (productId: string) => void;
 }) {
@@ -2622,22 +2650,15 @@ function ShoppingList({
     if (!canEditProducts) {
       return;
     }
-    if (editingProductId && editingProductId !== productId) {
-      const shouldDiscard = window.confirm("Descartar as alteracoes da linha atual e editar outro produto?");
-      if (!shouldDiscard) {
-        return;
-      }
-    }
     setSavedProductId(null);
     setEditingProductId(productId);
   }
 
-  function confirmProductEdit(productId: string, draft: ProductEditDraft) {
+  async function confirmProductEdit(productId: string, draft: ProductEditDraft) {
     if (!canEditProducts) {
       return;
     }
-    onInlineChange(productId, draft);
-    setEditingProductId(null);
+    await onInlineChange(productId, draft);
     setSavedProductId(productId);
     window.setTimeout(() => {
       setSavedProductId((current) => (current === productId ? null : current));
@@ -2693,7 +2714,7 @@ function ShoppingList({
                       <span className="grid shrink-0 justify-items-center gap-1">
                         <ProfileAvatar
                           user={{ name: list.ownerName ?? "Dono da lista", email: list.ownerEmail ?? "", avatarUrl: list.ownerAvatarUrl }}
-                          size="sm"
+                          size="list"
                         />
                         {!list.ownerAvatarUrl ? <small className="text-[10px] leading-none">sem foto</small> : null}
                       </span>
@@ -2843,7 +2864,7 @@ function ShoppingList({
                 readOnly={!canEditProducts}
                 readOnlyReason={readonlyReason}
                 onRequestEdit={requestProductEdit}
-                onCancelEdit={() => setEditingProductId(null)}
+                onCancelEdit={(productId) => setEditingProductId((current) => (current === productId ? null : current))}
                 onDelete={onDeleteProduct}
                 onSave={confirmProductEdit}
                 onToggleBought={onToggleBought}
@@ -2891,17 +2912,31 @@ function ProductGridRow({
   readOnly: boolean;
   readOnlyReason: string;
   onRequestEdit: (productId: string) => void;
-  onCancelEdit: () => void;
+  onCancelEdit: (productId: string) => void;
   onToggleBought: (productId: string) => void;
-  onSave: (productId: string, draft: ProductEditDraft) => void;
+  onSave: (productId: string, draft: ProductEditDraft) => Promise<void>;
   onDelete: (productId: string) => void;
 }) {
   const [draft, setDraft] = useState<ProductEditDraft>(() => productToEditDraft(product));
   const [error, setError] = useState("");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const rowRef = useRef<HTMLDivElement>(null);
+  const draftRef = useRef(draft);
+  const skipAutosaveRef = useRef(false);
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
+  const autosaveRef = useRef<() => void>(() => undefined);
+  const wasEditingRef = useRef(isEditing);
 
   useEffect(() => {
-    setDraft(productToEditDraft(product));
-    setError("");
+    const nextDraft = productToEditDraft(product);
+    setDraft(nextDraft);
+    draftRef.current = nextDraft;
+    if (isEditing && !wasEditingRef.current) {
+      skipAutosaveRef.current = false;
+      setError("");
+      setSaveStatus("idle");
+    }
+    wasEditingRef.current = isEditing;
   }, [isEditing, product]);
 
   const parsedQuantity = parseOptionalNumber(draft.quantity);
@@ -2918,37 +2953,132 @@ function ProductGridRow({
   }
 
   function cancelEdit() {
-    setDraft(productToEditDraft(product));
+    const originalDraft = productToEditDraft(product);
+    skipAutosaveRef.current = true;
+    setDraft(originalDraft);
+    draftRef.current = originalDraft;
     setError("");
-    onCancelEdit();
+    setSaveStatus("idle");
+    onCancelEdit(product.id);
   }
 
-  function saveEdit() {
+  function updateDraft(field: keyof ProductEditDraft, value: string) {
+    const nextDraft = { ...draftRef.current, [field]: value };
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
+    setError("");
+    if (saveStatus === "error" || saveStatus === "saved") {
+      setSaveStatus("idle");
+    }
+  }
+
+  async function saveEdit(closeAfterSave = true) {
     if (!isEditing || readOnly) {
-      return;
+      return true;
+    }
+    if (skipAutosaveRef.current) {
+      return true;
+    }
+    if (savePromiseRef.current) {
+      const saved = await savePromiseRef.current;
+      if (saved && closeAfterSave) {
+        onCancelEdit(product.id);
+      }
+      return saved;
     }
     setError("");
-    if (parsedQuantity === undefined) {
+    const currentDraft = draftRef.current;
+    const quantity = parseOptionalNumber(currentDraft.quantity);
+    const price = parseMoney(currentDraft.unitPrice);
+    if (quantity === undefined) {
       setError("Informe uma quantidade valida ou deixe em branco.");
-      return;
+      setSaveStatus("error");
+      return false;
     }
-    if (parsedPrice === undefined) {
+    if (price === undefined) {
       setError("Informe um valor unitario valido ou deixe em branco.");
+      setSaveStatus("error");
+      return false;
+    }
+    if (!productDraftHasChanges(product, currentDraft)) {
+      if (closeAfterSave) {
+        onCancelEdit(product.id);
+      }
+      return true;
+    }
+    setSaveStatus("saving");
+    const savePromise = onSave(product.id, currentDraft)
+      .then(() => {
+        setError("");
+        setSaveStatus("saved");
+        window.setTimeout(() => setSaveStatus((current) => (current === "saved" ? "idle" : current)), 1800);
+        return true;
+      })
+      .catch((saveError) => {
+        setError(getErrorMessage(saveError, "Nao foi possivel salvar esta linha."));
+        setSaveStatus("error");
+        return false;
+      })
+      .finally(() => {
+        savePromiseRef.current = null;
+      });
+    savePromiseRef.current = savePromise;
+    const saved = await savePromise;
+    if (saved && closeAfterSave) {
+      onCancelEdit(product.id);
+    }
+    return saved;
+  }
+
+  function saveFieldOnBlur(event: FocusEvent<HTMLInputElement>) {
+    if (rowRef.current?.contains(event.relatedTarget as Node | null)) {
+      void saveEdit(false);
+    }
+  }
+
+  function deleteRow() {
+    skipAutosaveRef.current = true;
+    onDelete(product.id);
+  }
+
+  autosaveRef.current = () => {
+    if (isEditing && productDraftHasChanges(product, draftRef.current)) {
+      void saveEdit();
+    }
+  };
+
+  useEffect(() => {
+    if (!isEditing) {
       return;
     }
-    onSave(product.id, draft);
-  }
+    const saveWhenClickingOutside = (event: PointerEvent) => {
+      if (rowRef.current && !rowRef.current.contains(event.target as Node)) {
+        void saveEdit();
+      }
+    };
+    document.addEventListener("pointerdown", saveWhenClickingOutside, true);
+    return () => document.removeEventListener("pointerdown", saveWhenClickingOutside, true);
+  });
+
+  useEffect(() => () => autosaveRef.current(), []);
 
   return (
     <div
+      ref={rowRef}
       className={[
         "compact-product-row",
         product.isBought ? "compact-product-row-done" : "",
         isEditing ? "compact-product-row-active" : "",
-        isRecentlySaved ? "compact-product-row-saved" : ""
+        isRecentlySaved || saveStatus === "saved" ? "compact-product-row-saved" : "",
+        saveStatus === "error" ? "compact-product-row-error" : ""
       ]
         .filter(Boolean)
         .join(" ")}
+      onBlurCapture={(event) => {
+        if (isEditing && !event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          void saveEdit();
+        }
+      }}
     >
       <div className="product-name-cell">
         <button
@@ -2956,7 +3086,7 @@ function ProductGridRow({
           type="button"
           aria-label={product.isBought ? "Comprado" : "Nao comprado"}
           title={readOnly ? readOnlyReason : undefined}
-          disabled={readOnly}
+          disabled={readOnly || isEditing || saveStatus === "saving"}
           onClick={() => onToggleBought(product.id)}
         >
           {product.isBought ? <CheckCircle2 size={18} /> : <Circle size={18} />}
@@ -2969,7 +3099,15 @@ function ProductGridRow({
           title={readOnly ? readOnlyReason : undefined}
         >
           <strong title={product.name}>{product.name}</strong>
-          {isRecentlySaved ? <small className="row-save-feedback">Alteracoes gravadas</small> : null}
+          {saveStatus !== "idle" || isRecentlySaved ? (
+            <small className={`row-save-feedback row-save-feedback-${saveStatus}`} aria-live="polite">
+              {saveStatus === "saving"
+                ? "Salvando..."
+                : saveStatus === "error"
+                  ? "Erro ao salvar"
+                  : "Salvo"}
+            </small>
+          ) : null}
         </button>
       </div>
       {isEditing ? (
@@ -2980,7 +3118,9 @@ function ProductGridRow({
             value={draft.quantity}
             placeholder="-"
             aria-label={`Quantidade de ${product.name}`}
-            onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
+            disabled={saveStatus === "saving"}
+            onChange={(event) => updateDraft("quantity", event.target.value)}
+            onBlur={saveFieldOnBlur}
           />
           <input
             className="inline-input inline-input-money"
@@ -2988,35 +3128,40 @@ function ProductGridRow({
             value={draft.unitPrice}
             placeholder="-"
             aria-label={`Valor unitario de ${product.name}`}
-            onChange={(event) => setDraft({ ...draft, unitPrice: event.target.value })}
+            disabled={saveStatus === "saving"}
+            onChange={(event) => updateDraft("unitPrice", event.target.value)}
+            onBlur={saveFieldOnBlur}
           />
           <input
             className="inline-input"
             value={draft.brand}
-            onChange={(event) => setDraft({ ...draft, brand: event.target.value })}
+            disabled={saveStatus === "saving"}
+            onChange={(event) => updateDraft("brand", event.target.value)}
+            onBlur={saveFieldOnBlur}
             placeholder="Opcional"
             aria-label={`Marca de ${product.name}`}
           />
           <input
             className="inline-input"
             value={draft.supermarket}
-            onChange={(event) => setDraft({ ...draft, supermarket: event.target.value })}
+            disabled={saveStatus === "saving"}
+            onChange={(event) => updateDraft("supermarket", event.target.value)}
+            onBlur={saveFieldOnBlur}
             placeholder="Opcional"
             aria-label={`Supermercado de ${product.name}`}
           />
           <span className="line-total">{money(rowTotal)}</span>
           <span className="row-actions">
-            <button className="icon-button row-save-button" type="button" onClick={saveEdit} aria-label="Gravar produto">
+            <button className="icon-button row-save-button" type="button" onClick={() => void saveEdit()} aria-label="Gravar produto" disabled={saveStatus === "saving"}>
               <Save size={16} />
             </button>
-            <button className="icon-button" type="button" onClick={cancelEdit} aria-label="Cancelar edicao">
+            <button className="icon-button" type="button" onClick={cancelEdit} aria-label="Cancelar edicao" disabled={saveStatus === "saving"}>
               <X size={16} />
             </button>
-            <button className="icon-button" type="button" onClick={() => onDelete(product.id)} aria-label="Excluir produto">
+            <button className="icon-button" type="button" onClick={deleteRow} aria-label="Excluir produto" disabled={saveStatus === "saving"}>
               <Trash2 size={16} />
             </button>
           </span>
-          {error ? <p className="row-edit-error">{error}</p> : null}
         </>
       ) : (
         <>
@@ -3045,19 +3190,17 @@ function ProductGridRow({
             </span>
           ) : (
             <span className="row-actions">
-              <button className="icon-button row-save-button" type="button" onClick={saveEdit} aria-label="Gravar produto" disabled>
-                <Save size={16} />
+              <button className="icon-button" type="button" onClick={startEdit} aria-label={`Editar ${product.name}`}>
+                <Edit3 size={16} />
               </button>
-              <button className="icon-button" type="button" onClick={cancelEdit} aria-label="Cancelar edicao" disabled>
-                <X size={16} />
-              </button>
-              <button className="icon-button" type="button" onClick={() => onDelete(product.id)} aria-label="Excluir produto">
+              <button className="icon-button" type="button" onClick={deleteRow} aria-label="Excluir produto">
                 <Trash2 size={16} />
               </button>
             </span>
           )}
         </>
       )}
+      {error ? <p className="row-edit-error">{error}</p> : null}
     </div>
   );
 }
@@ -3487,7 +3630,7 @@ function SharedLists({
   onRemoveShare: (shareId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void | Promise<void>;
   onToggleBought: (productId: string) => void;
-  onInlineChange: (productId: string, draft: ProductEditDraft) => void;
+  onInlineChange: (productId: string, draft: ProductEditDraft) => Promise<void>;
   onClearFields: (listId: string, fields: ClearProductFields) => void;
   onDeleteProduct: (productId: string) => void;
 }) {
@@ -3531,7 +3674,7 @@ function SharedListsContent(props: {
   onRemoveShare: (shareId: string) => void | Promise<void>;
   onSaveProduct: (listId: string, form: ProductForm) => void | Promise<void>;
   onToggleBought: (productId: string) => void;
-  onInlineChange: (productId: string, draft: ProductEditDraft) => void;
+  onInlineChange: (productId: string, draft: ProductEditDraft) => Promise<void>;
   onClearFields: (listId: string, fields: ClearProductFields) => void;
   onDeleteProduct: (productId: string) => void;
 }) {
@@ -3864,6 +4007,206 @@ function ShareListsScreen({
   );
 }
 
+type PredictionConfidence = "baixo" | "medio" | "alto";
+
+type ProductPrediction = {
+  key: string;
+  name: string;
+  averageQuantity: number;
+  purchaseMonths: number;
+  averageInterval: number | null;
+  lastMonth: number;
+  nextMonth: number | null;
+  recommendation: string;
+  confidence: PredictionConfidence;
+};
+
+function PredictionList({ products }: { products: Product[] }) {
+  const [query, setQuery] = useState("");
+  const [supermarket, setSupermarket] = useState("Todos");
+  const [period, setPeriod] = useState("24");
+  const boughtProducts = useMemo(() => products.filter((product) => product.isBought), [products]);
+  const supermarkets = useMemo(
+    () => ["Todos", ...Array.from(new Set(boughtProducts.map((product) => product.supermarket).filter(Boolean))).sort()],
+    [boughtProducts]
+  );
+  const filteredProducts = useMemo(() => {
+    const normalizedQuery = normalizePredictionProductName(query);
+    const currentMonth = toMonthIndex(Date.now());
+    const minimumMonth = period === "all" ? Number.NEGATIVE_INFINITY : currentMonth - Number(period) + 1;
+    return boughtProducts.filter((product) => {
+      const matchesName = !normalizedQuery || normalizePredictionProductName(product.name).includes(normalizedQuery);
+      const matchesMarket = supermarket === "Todos" || product.supermarket === supermarket;
+      return matchesName && matchesMarket && toMonthIndex(product.timestamp) >= minimumMonth;
+    });
+  }, [boughtProducts, period, query, supermarket]);
+  const predictions = useMemo(() => buildProductPredictions(filteredProducts), [filteredProducts]);
+  const recurringProducts = predictions.filter((prediction) => prediction.averageInterval !== null).length;
+  const buyNow = predictions.filter((prediction) => prediction.recommendation === "Comprar agora").length;
+
+  return (
+    <section className="prediction-page mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mb-5 flex flex-col gap-2">
+        <p className="text-sm font-black uppercase text-supermarket-leaf">Planejamento</p>
+        <h2 className="flex items-center gap-2 text-2xl font-black">
+          <CalendarClock size={24} />
+          Predição Lista
+        </h2>
+        <p className="max-w-3xl text-supermarket-ink/60">
+          Estimativas baseadas somente nos itens comprados das suas listas. O cálculo usa recorrência mensal e não envia dados para serviços externos.
+        </p>
+      </div>
+
+      <div className="prediction-metrics">
+        <MetricCard label="Registros comprados" value={filteredProducts.length.toString()} />
+        <MetricCard label="Produtos recorrentes" value={recurringProducts.toString()} />
+        <MetricCard label="Comprar agora" value={buyNow.toString()} />
+      </div>
+
+      <div className="prediction-filters panel">
+        <label className="field">
+          <span>Produto</span>
+          <input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto" />
+        </label>
+        <label className="field">
+          <span>Supermercado</span>
+          <select className="input" value={supermarket} onChange={(event) => setSupermarket(event.target.value)}>
+            {supermarkets.map((item) => (
+              <option key={item}>{item}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Período</span>
+          <select className="input" value={period} onChange={(event) => setPeriod(event.target.value)}>
+            <option value="6">Últimos 6 meses</option>
+            <option value="12">Últimos 12 meses</option>
+            <option value="24">Últimos 24 meses</option>
+            <option value="all">Todo o histórico</option>
+          </select>
+        </label>
+      </div>
+
+      {predictions.length === 0 ? (
+        <div className="prediction-empty">
+          <Target size={36} />
+          <strong>Ainda não há histórico suficiente para gerar predição.</strong>
+          <span>Marque produtos como comprados em suas listas para formar uma base de recorrência.</span>
+        </div>
+      ) : (
+        <div className="prediction-list">
+          {predictions.map((prediction) => (
+            <article className="prediction-card" key={prediction.key}>
+              <div className="prediction-card-header">
+                <div className="min-w-0">
+                  <h3 className="truncate text-lg font-black" title={prediction.name}>{prediction.name}</h3>
+                  <p>{prediction.purchaseMonths} {prediction.purchaseMonths === 1 ? "mês com compra" : "meses com compras"}</p>
+                </div>
+                <span className={`prediction-confidence prediction-confidence-${prediction.confidence}`}>
+                  Confiança {prediction.confidence === "medio" ? "média" : prediction.confidence}
+                </span>
+              </div>
+              <div className="prediction-card-data">
+                <Summary label="Quantidade média" value={formatPredictionQuantity(prediction.averageQuantity)} />
+                <Summary
+                  label="Frequência média"
+                  value={prediction.averageInterval === null ? "Dados insuficientes" : `A cada ${formatPredictionInterval(prediction.averageInterval)} meses`}
+                />
+                <Summary label="Última compra" value={formatPredictionMonth(prediction.lastMonth)} />
+                <Summary label="Próxima previsão" value={prediction.nextMonth === null ? "Indisponível" : formatPredictionMonth(prediction.nextMonth)} />
+              </div>
+              <div className="prediction-recommendation">
+                <CalendarClock size={18} />
+                <strong>{prediction.recommendation}</strong>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function buildProductPredictions(products: Product[]): ProductPrediction[] {
+  const grouped = new Map<string, { name: string; monthlyQuantities: Map<number, number> }>();
+  for (const product of products) {
+    const key = normalizePredictionProductName(product.name);
+    if (!key) {
+      continue;
+    }
+    const group = grouped.get(key) ?? { name: product.name.trim(), monthlyQuantities: new Map<number, number>() };
+    const month = toMonthIndex(product.timestamp);
+    const quantity = typeof product.quantity === "number" && product.quantity > 0 ? product.quantity : 1;
+    group.monthlyQuantities.set(month, (group.monthlyQuantities.get(month) ?? 0) + quantity);
+    grouped.set(key, group);
+  }
+
+  const currentMonth = toMonthIndex(Date.now());
+  return Array.from(grouped.entries())
+    .map(([key, group]) => {
+      const months = Array.from(group.monthlyQuantities.keys()).sort((a, b) => a - b);
+      const intervals = months.slice(1).map((month, index) => month - months[index]);
+      const averageInterval = intervals.length > 0 ? intervals.reduce((sum, interval) => sum + interval, 0) / intervals.length : null;
+      const averageQuantity =
+        Array.from(group.monthlyQuantities.values()).reduce((sum, quantity) => sum + quantity, 0) / months.length;
+      const lastMonth = months.at(-1) ?? currentMonth;
+      const nextMonth = averageInterval === null ? null : lastMonth + Math.max(1, Math.round(averageInterval));
+      const monthsUntilNext = nextMonth === null ? null : nextMonth - currentMonth;
+      const recommendation =
+        monthsUntilNext === null
+          ? "Sem dados suficientes para previsão confiável"
+          : monthsUntilNext <= 0
+            ? "Comprar agora"
+            : monthsUntilNext === 1
+              ? "Provável no próximo mês"
+              : `Provável em ${monthsUntilNext} meses`;
+      const intervalVariation =
+        averageInterval === null || intervals.length === 0
+          ? Number.POSITIVE_INFINITY
+          : intervals.reduce((sum, interval) => sum + Math.abs(interval - averageInterval), 0) / intervals.length;
+      const confidence: PredictionConfidence =
+        months.length >= 4 && intervalVariation <= 1 ? "alto" : months.length >= 3 ? "medio" : "baixo";
+      return {
+        key,
+        name: group.name,
+        averageQuantity,
+        purchaseMonths: months.length,
+        averageInterval,
+        lastMonth,
+        nextMonth,
+        recommendation,
+        confidence
+      };
+    })
+    .sort((a, b) => {
+      if (a.nextMonth === null && b.nextMonth !== null) return 1;
+      if (a.nextMonth !== null && b.nextMonth === null) return -1;
+      return (a.nextMonth ?? 0) - (b.nextMonth ?? 0) || a.name.localeCompare(b.name, "pt-BR");
+    });
+}
+
+function normalizePredictionProductName(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function toMonthIndex(timestamp: number) {
+  const date = new Date(timestamp);
+  return date.getFullYear() * 12 + date.getMonth();
+}
+
+function formatPredictionMonth(monthIndex: number) {
+  const date = new Date(Math.floor(monthIndex / 12), monthIndex % 12, 1);
+  return new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(date);
+}
+
+function formatPredictionQuantity(value: number) {
+  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(value);
+}
+
+function formatPredictionInterval(value: number) {
+  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(value);
+}
+
 function Dashboard({ products, priceHistory }: { products: Product[]; priceHistory: PriceHistory[] }) {
   const productNames = useMemo(
     () => Array.from(new Set(priceHistory.map((item) => item.productName))).sort(),
@@ -4184,20 +4527,23 @@ function SideMenu({
           <NavButton active={currentView === "home"} onClick={() => onNavigate("home")}>
             Home
           </NavButton>
-          <NavButton active={currentView === "sharing"} onClick={() => onNavigate("sharing")}>
-            Compartilhar listas
+          <NavButton active={currentView === "list"} onClick={() => onNavigate("list")}>
+            Lista
           </NavButton>
           <NavButton active={currentView === "shared"} onClick={() => onNavigate("shared")}>
             Outras listas
-          </NavButton>
-          <NavButton active={currentView === "list"} onClick={() => onNavigate("list")}>
-            Lista
           </NavButton>
           <NavButton active={currentView === "dashboard"} onClick={() => onNavigate("dashboard")}>
             Dashboard
           </NavButton>
           <NavButton active={currentView === "history"} onClick={() => onNavigate("history")}>
-            Historico
+            Histórico
+          </NavButton>
+          <NavButton active={currentView === "prediction"} onClick={() => onNavigate("prediction")}>
+            Predição Lista
+          </NavButton>
+          <NavButton active={currentView === "sharing"} onClick={() => onNavigate("sharing")}>
+            Compartilhar lista
           </NavButton>
           <NavButton active={currentView === "profile"} onClick={() => onNavigate("profile")}>
             Perfil
