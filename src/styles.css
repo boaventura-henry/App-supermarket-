@@ -498,20 +498,21 @@
   }
 
   .compact-product-row {
-    @apply min-h-10 border-t border-supermarket-ink/10 py-1.5 text-sm transition hover:bg-supermarket-mint/30;
+    @apply min-h-10 border-t border-supermarket-ink/15 py-2 text-sm transition hover:bg-supermarket-mint/30;
   }
 
   .product-name-cell {
-    @apply sticky left-0 z-[2] flex min-w-0 items-center gap-1.5 bg-white pr-1 sm:gap-2;
+    @apply sticky left-0 z-[2] flex min-w-0 self-stretch items-center gap-1.5 bg-white py-1 pr-1 sm:gap-2;
     box-shadow: 10px 0 16px -16px rgba(24, 45, 37, 0.55);
   }
 
   .product-name-cell strong {
-    @apply min-w-0 truncate font-black;
+    @apply min-w-0 whitespace-normal break-words font-black leading-snug;
+    overflow-wrap: anywhere;
   }
 
   .product-name-stack {
-    @apply grid min-w-0 gap-0.5 text-left;
+    @apply grid min-w-0 flex-1 gap-0.5 text-left;
   }
 
   .product-name-edit-trigger {
@@ -538,7 +539,7 @@
   }
 
   .inline-value-button {
-    @apply h-8 w-full truncate rounded-xl px-1.5 text-left text-sm font-bold text-supermarket-ink/75 transition hover:bg-supermarket-mint/50 hover:text-supermarket-ink focus:outline-none focus:ring-2 focus:ring-supermarket-leaf/20 sm:px-2;
+    @apply h-8 w-full truncate rounded-lg border border-supermarket-ink/20 bg-supermarket-paper/45 px-1.5 text-left text-sm font-bold text-supermarket-ink/75 transition hover:border-supermarket-leaf/45 hover:bg-supermarket-mint/50 hover:text-supermarket-ink focus:border-supermarket-leaf focus:bg-white focus:outline-none focus:ring-2 focus:ring-supermarket-leaf/20 sm:px-2;
   }
 
   .inline-value-money {
@@ -635,7 +636,7 @@
   }
 
   .inline-input {
-    @apply h-8 w-full rounded-xl border border-transparent bg-supermarket-paper/70 px-2 text-sm font-bold text-supermarket-ink outline-none transition hover:border-supermarket-ink/10 focus:border-supermarket-leaf focus:bg-white focus:ring-2 focus:ring-supermarket-leaf/15;
+    @apply h-8 w-full rounded-lg border border-supermarket-ink/25 bg-supermarket-paper/70 px-2 text-sm font-bold text-supermarket-ink outline-none transition hover:border-supermarket-leaf/45 focus:border-supermarket-leaf focus:bg-white focus:ring-2 focus:ring-supermarket-leaf/20;
   }
 
   .inline-input-money {
@@ -1048,6 +1049,18 @@
   .theme-dark .inline-value-button:focus {
     background: rgba(109, 247, 167, 0.12);
     color: #e9fff3;
+  }
+
+  .theme-dark .inline-value-button {
+    background: rgba(2, 8, 6, 0.72);
+    border-color: rgba(125, 255, 176, 0.28);
+  }
+
+  .theme-dark .inline-value-button:hover,
+  .theme-dark .inline-value-button:focus,
+  .theme-dark .inline-input:hover,
+  .theme-dark .inline-input:focus {
+    border-color: rgba(125, 255, 176, 0.68);
   }
 
   .theme-dark .inline-value-button:disabled,
