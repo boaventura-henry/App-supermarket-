@@ -189,6 +189,28 @@ function money(value: number) {
   return currency.format(value);
 }
 
+function formatCurrencyInput(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (!digits) {
+    return "";
+  }
+
+  const padded = digits.padStart(3, "0");
+  const cents = padded.slice(-2);
+  const integer = padded.slice(0, -2).replace(/^0+(?=\d)/, "");
+  const formattedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+
+  return `${formattedInteger},${cents}`;
+}
+
+function formatUnitPriceForInput(value: number | null) {
+  if (value === null) {
+    return "";
+  }
+
+  return formatCurrencyInput(String(Math.round(value * 100)));
+}
+
 function parseMoney(value: string) {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -211,7 +233,7 @@ function productToEditDraft(product: Product): ProductEditDraft {
   return {
     brand: product.brand ?? "",
     quantity: product.quantity !== null ? String(product.quantity).replace(".", ",") : "",
-    unitPrice: product.unitPrice !== null ? product.unitPrice.toFixed(2).replace(".", ",") : "",
+    unitPrice: formatUnitPriceForInput(product.unitPrice),
     supermarket: product.supermarket || ""
   };
 }
@@ -3124,12 +3146,12 @@ function ProductGridRow({
           />
           <input
             className="inline-input inline-input-money"
-            inputMode="decimal"
+            inputMode="numeric"
             value={draft.unitPrice}
             placeholder="-"
             aria-label={`Valor unitario de ${product.name}`}
             disabled={saveStatus === "saving"}
-            onChange={(event) => updateDraft("unitPrice", event.target.value)}
+            onChange={(event) => updateDraft("unitPrice", formatCurrencyInput(event.target.value))}
             onBlur={saveFieldOnBlur}
           />
           <input
@@ -3301,9 +3323,9 @@ function ProductModal({ onCancel, onSave }: { onCancel: () => void; onSave: (for
               <span>Valor unitario</span>
               <input
                 className="input"
-                inputMode="decimal"
+                inputMode="numeric"
                 value={form.unitPrice}
-                onChange={(event) => updateField("unitPrice", event.target.value)}
+                onChange={(event) => updateField("unitPrice", formatCurrencyInput(event.target.value))}
                 placeholder="Opcional"
               />
             </label>
