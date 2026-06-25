@@ -150,6 +150,40 @@ type ProductSort = {
   direction: "asc" | "desc";
 };
 
+function getProductOriginalOrder(product: Product) {
+  return Number.isFinite(product.sortOrder) ? product.sortOrder : product.timestamp;
+}
+
+function compareProductsForDisplay(a: Product, b: Product, sort: ProductSort) {
+  const originalOrder =
+    getProductOriginalOrder(a) - getProductOriginalOrder(b) ||
+    a.timestamp - b.timestamp ||
+    a.id.localeCompare(b.id);
+
+  if (sort.field === "original") {
+    return originalOrder;
+  }
+
+  const result =
+    sort.field === "quantity"
+      ? (a.quantity ?? Number.MAX_SAFE_INTEGER) - (b.quantity ?? Number.MAX_SAFE_INTEGER)
+      : a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
+
+  if (result === 0) {
+    return originalOrder;
+  }
+
+  return sort.direction === "asc" ? result : -result;
+}
+
+function sortProductsForDisplay(products: Product[], sort: ProductSort) {
+  const uncheckedItems = products.filter((product) => !product.isBought);
+  const checkedItems = products.filter((product) => product.isBought);
+  const compare = (a: Product, b: Product) => compareProductsForDisplay(a, b, sort);
+
+  return [...uncheckedItems.sort(compare), ...checkedItems.sort(compare)];
+}
+
 const currency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL"
@@ -2624,28 +2658,7 @@ function ShoppingList({
       return [];
     }
     const scopedProducts = products.filter((product) => product.listId === selectedList.id);
-    return scopedProducts.slice().sort((a, b) => {
-      const boughtOrder = Number(isPurchasedItem(a)) - Number(isPurchasedItem(b));
-      if (boughtOrder !== 0) {
-        return boughtOrder;
-      }
-
-      const originalOrder =
-        (Number.isFinite(a.sortOrder) ? a.sortOrder : a.timestamp) -
-          (Number.isFinite(b.sortOrder) ? b.sortOrder : b.timestamp) || a.timestamp - b.timestamp || a.id.localeCompare(b.id);
-      if (sort.field === "original") {
-        return originalOrder;
-      }
-
-      const result =
-        sort.field === "quantity"
-          ? (a.quantity ?? Number.MAX_SAFE_INTEGER) - (b.quantity ?? Number.MAX_SAFE_INTEGER)
-          : a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
-      if (result === 0) {
-        return originalOrder;
-      }
-      return sort.direction === "asc" ? result : -result;
-    });
+    return sortProductsForDisplay(scopedProducts, sort);
   }, [products, selectedList, sort]);
 
   function toggleSort(field: ProductSortField) {
