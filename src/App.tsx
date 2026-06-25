@@ -101,6 +101,7 @@ import {
   updateProfile as updateRemoteProfile,
   uploadProfilePhoto
 } from "./services/profileApi";
+import { filterPriceHistoryForPurchasedItems, isPendingItem, isPurchasedItem } from "./productRules";
 
 type AuthMode = "login" | "register" | "recover";
 type ThemeMode = "light" | "dark";
@@ -1781,7 +1782,7 @@ export function App() {
 
       {view === "dashboard" ? <Dashboard products={userData.products} priceHistory={userData.priceHistory} /> : null}
 
-      {view === "history" ? <HistoryView priceHistory={userData.priceHistory} /> : null}
+      {view === "history" ? <HistoryView products={userData.products} priceHistory={userData.priceHistory} /> : null}
 
       {view === "prediction" ? <PredictionList products={userData.products} /> : null}
 
@@ -2486,7 +2487,7 @@ function AuthScreen({
 function Home({ products }: { products: Product[] }) {
   const boughtByMarket = useMemo(() => {
     const grouped = products
-      .filter((product) => product.isBought)
+      .filter(isPurchasedItem)
       .reduce<Record<string, number>>((acc, product) => {
         const market = (product.supermarket ?? "").trim() || "Sem supermercado";
         acc[market] = (acc[market] ?? 0) + 1;
@@ -2614,7 +2615,7 @@ function ShoppingList({
   };
   const getListSummary = (listId: string) => {
     const listItems = products.filter((product) => product.listId === listId);
-    const bought = listItems.filter((product) => product.isBought).length;
+    const bought = listItems.filter(isPurchasedItem).length;
     const total = listItems.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
     return { count: listItems.length, bought, total };
   };
@@ -2624,7 +2625,7 @@ function ShoppingList({
     }
     const scopedProducts = products.filter((product) => product.listId === selectedList.id);
     return scopedProducts.slice().sort((a, b) => {
-      const boughtOrder = Number(a.isBought) - Number(b.isBought);
+      const boughtOrder = Number(isPurchasedItem(a)) - Number(isPurchasedItem(b));
       if (boughtOrder !== 0) {
         return boughtOrder;
       }
@@ -2656,10 +2657,12 @@ function ShoppingList({
   }
 
   const total = listProducts.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
-  const boughtProducts = listProducts.filter((product) => product.isBought);
+  const boughtProducts = listProducts.filter(isPurchasedItem);
+  const pendingProducts = listProducts.filter(isPendingItem);
   const boughtCount = boughtProducts.length;
   const boughtTotal = boughtProducts.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
-  const completionRate = listProducts.length > 0 ? Math.round((boughtCount / listProducts.length) * 100) : 0;
+  const completionTotal = boughtProducts.length + pendingProducts.length;
+  const completionRate = completionTotal > 0 ? Math.round((boughtCount / completionTotal) * 100) : 0;
 
   function saveProductFromModal(form: ProductForm) {
     if (!selectedList || !canEditProducts) {
@@ -4047,7 +4050,7 @@ function PredictionList({ products }: { products: Product[] }) {
   const [query, setQuery] = useState("");
   const [supermarket, setSupermarket] = useState("Todos");
   const [period, setPeriod] = useState("24");
-  const boughtProducts = useMemo(() => products.filter((product) => product.isBought), [products]);
+  const boughtProducts = useMemo(() => products.filter(isPurchasedItem), [products]);
   const supermarkets = useMemo(
     () => ["Todos", ...Array.from(new Set(boughtProducts.map((product) => product.supermarket).filter(Boolean))).sort()],
     [boughtProducts]
@@ -4230,13 +4233,18 @@ function formatPredictionInterval(value: number) {
 }
 
 function Dashboard({ products, priceHistory }: { products: Product[]; priceHistory: PriceHistory[] }) {
+  const purchasedProducts = useMemo(() => products.filter(isPurchasedItem), [products]);
+  const purchasedPriceHistory = useMemo(
+    () => filterPriceHistoryForPurchasedItems(priceHistory, products),
+    [priceHistory, products]
+  );
   const productNames = useMemo(
-    () => Array.from(new Set(priceHistory.map((item) => item.productName))).sort(),
-    [priceHistory]
+    () => Array.from(new Set(purchasedPriceHistory.map((item) => item.productName))).sort(),
+    [purchasedPriceHistory]
   );
   const markets = useMemo(
-    () => ["Todos", ...Array.from(new Set(priceHistory.map((item) => item.supermarket))).sort()],
-    [priceHistory]
+    () => ["Todos", ...Array.from(new Set(purchasedPriceHistory.map((item) => item.supermarket))).sort()],
+    [purchasedPriceHistory]
   );
   const [productName, setProductName] = useState(productNames[0] ?? "");
   const [market, setMarket] = useState("Todos");
@@ -4250,17 +4258,17 @@ function Dashboard({ products, priceHistory }: { products: Product[]; priceHisto
 
   const filteredHistory = useMemo(() => {
     const since = Date.now() - Number(months) * 31 * 24 * 60 * 60 * 1000;
-    return priceHistory.filter((item) => {
+    return purchasedPriceHistory.filter((item) => {
       const matchesProduct = !productName || item.productName === productName;
       const matchesMarket = market === "Todos" || item.supermarket === market;
       return matchesProduct && matchesMarket && item.timestamp >= since;
     });
-  }, [market, months, priceHistory, productName]);
+  }, [market, months, purchasedPriceHistory, productName]);
 
   const monthly = useMemo(() => buildMonthlySeries(filteredHistory), [filteredHistory]);
   const comparison = useMemo(() => buildMarketComparison(filteredHistory), [filteredHistory]);
   const total = products.reduce((sum, product) => sum + (product.quantity ?? 0) * (product.unitPrice ?? 0), 0);
-  const bought = products.filter((product) => product.isBought).length;
+  const bought = purchasedProducts.length;
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -4268,7 +4276,7 @@ function Dashboard({ products, priceHistory }: { products: Product[]; priceHisto
         <MetricCard label="Produtos" value={products.length.toString()} />
         <MetricCard label="Comprados" value={bought.toString()} />
         <MetricCard label="Total estimado" value={money(total)} />
-        <MetricCard label="Historicos" value={priceHistory.length.toString()} />
+        <MetricCard label="Historicos" value={purchasedPriceHistory.length.toString()} />
       </div>
 
       <div className="mb-5 grid gap-3 lg:grid-cols-3">
@@ -4310,18 +4318,22 @@ function Dashboard({ products, priceHistory }: { products: Product[]; priceHisto
   );
 }
 
-function HistoryView({ priceHistory }: { priceHistory: PriceHistory[] }) {
+function HistoryView({ products, priceHistory }: { products: Product[]; priceHistory: PriceHistory[] }) {
   const [query, setQuery] = useState("");
   const [market, setMarket] = useState("Todos");
   const [month, setMonth] = useState("Todos");
   const [selected, setSelected] = useState<PriceHistory | null>(null);
+  const purchasedPriceHistory = useMemo(
+    () => filterPriceHistoryForPurchasedItems(priceHistory, products),
+    [priceHistory, products]
+  );
 
-  const markets = useMemo(() => ["Todos", ...Array.from(new Set(priceHistory.map((item) => item.supermarket))).sort()], [priceHistory]);
-  const months = useMemo(() => ["Todos", ...Array.from(new Set(priceHistory.map((item) => monthKey(item.timestamp)))).sort().reverse()], [priceHistory]);
+  const markets = useMemo(() => ["Todos", ...Array.from(new Set(purchasedPriceHistory.map((item) => item.supermarket))).sort()], [purchasedPriceHistory]);
+  const months = useMemo(() => ["Todos", ...Array.from(new Set(purchasedPriceHistory.map((item) => monthKey(item.timestamp)))).sort().reverse()], [purchasedPriceHistory]);
 
   const filtered = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    return sortByNewest(priceHistory).filter((item) => {
+    return sortByNewest(purchasedPriceHistory).filter((item) => {
       const matchesQuery =
         item.productName.toLowerCase().includes(normalizedQuery) ||
         (item.brand ?? "").toLowerCase().includes(normalizedQuery);
@@ -4329,7 +4341,7 @@ function HistoryView({ priceHistory }: { priceHistory: PriceHistory[] }) {
       const matchesMonth = month === "Todos" || monthKey(item.timestamp) === month;
       return matchesQuery && matchesMarket && matchesMonth;
     });
-  }, [market, month, priceHistory, query]);
+  }, [market, month, purchasedPriceHistory, query]);
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
